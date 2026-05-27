@@ -9,11 +9,11 @@
       android:translateX="256"
       android:translateY="256">
     <path
-        android:pathData="M178.3,830.8A128,384 80,0 1,934.6 697.4"
+        android:pathData="M178.3,830.8A128,384 80,0 1,934.6 697.4A128,384 80,0 1,178.3 830.8Z"
         android:strokeWidth="72"
         android:fillColor="#00000000">
       <aapt:attr name="android:strokeColor">
-        <gradient 
+        <gradient
             android:startX="177.8"
             android:startY="622.5"
             android:endX="934.6"
