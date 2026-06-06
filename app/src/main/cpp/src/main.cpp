@@ -1,3 +1,8 @@
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -57,6 +62,83 @@
 
 #include "zstd.h"
 
+// FP16 token-embedding lookup table. Either owns a converted vector (when the
+// on-disk data was FP32 and had to be narrowed) or maps the on-disk FP16 file
+// read-only. Lookups are sparse (only the prompt's token rows), so the mmap
+// path keeps the large table out of resident anonymous memory: untouched rows
+// never fault in, and the pages that do are clean and reclaimable.
+class TokenEmbTable {
+ public:
+  TokenEmbTable() = default;
+  ~TokenEmbTable() { reset(); }
+  TokenEmbTable(const TokenEmbTable &) = delete;
+  TokenEmbTable &operator=(const TokenEmbTable &) = delete;
+
+  bool empty() const { return data_ == nullptr; }
+  uint16_t operator[](size_t i) const { return data_[i]; }
+
+  void setOwned(std::vector<uint16_t> &&v) {
+    reset();
+    owned_ = std::move(v);
+    data_ = owned_.data();
+  }
+  void setMapped(void *base, size_t bytes) {
+    reset();
+    map_ = base;
+    mapBytes_ = bytes;
+    data_ = static_cast<const uint16_t *>(base);
+  }
+
+ private:
+  void reset() {
+    if (map_ != nullptr) {
+      munmap(map_, mapBytes_);
+      map_ = nullptr;
+      mapBytes_ = 0;
+    }
+    owned_ = std::vector<uint16_t>();
+    data_ = nullptr;
+  }
+  const uint16_t *data_ = nullptr;
+  std::vector<uint16_t> owned_;
+  void *map_ = nullptr;
+  size_t mapBytes_ = 0;
+};
+
+// RAII read-only whole-file memory map. For large, transient inputs (e.g. the
+// original model used as a zstd patch dictionary) this keeps the bytes as
+// reclaimable, file-backed pages instead of a large anonymous heap buffer, and
+// unmaps on every scope exit including exceptions.
+struct MmapFile {
+  const uint8_t *data = nullptr;
+  size_t size = 0;
+
+  explicit MmapFile(const std::string &path) {
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) return;
+    struct stat st{};
+    if (0 == fstat(fd, &st) && st.st_size > 0) {
+      void *m = mmap(nullptr, static_cast<size_t>(st.st_size), PROT_READ,
+                     MAP_PRIVATE, fd, 0);
+      if (m != MAP_FAILED) {
+        base_ = m;
+        size = static_cast<size_t>(st.st_size);
+        data = static_cast<const uint8_t *>(m);
+      }
+    }
+    close(fd);
+  }
+  ~MmapFile() {
+    if (base_ != nullptr) munmap(base_, size);
+  }
+  MmapFile(const MmapFile &) = delete;
+  MmapFile &operator=(const MmapFile &) = delete;
+  bool valid() const { return data != nullptr; }
+
+ private:
+  void *base_ = nullptr;
+};
+
 int port = 8081;
 std::string listen_address = "127.0.0.1";
 bool use_v_pred = false;
@@ -71,9 +153,9 @@ float nsfw_threshold = 0.5f;
 std::string clipPath, clip2Path, unetPath, vaeDecoderPath, vaeEncoderPath,
     safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
 std::vector<float> pos_emb;
-std::vector<uint16_t> token_emb;  // Stored as FP16 to save memory
+TokenEmbTable token_emb;  // FP16, mmap-backed when stored as FP16 on disk
 std::vector<float> pos_emb_2;
-std::vector<uint16_t> token_emb_2;  // SDXL encoder 2 token embeddings (FP16)
+TokenEmbTable token_emb_2;  // SDXL encoder 2 token embeddings (FP16)
 std::shared_ptr<tokenizers::Tokenizer> tokenizer;
 PromptProcessor promptProcessor;
 std::unique_ptr<QnnModel> clipApp = nullptr;
@@ -301,6 +383,46 @@ std::unique_ptr<QnnModel> createQnnModel(const std::string &modelPath,
   return app;
 }
 
+// Load an MNN model via mmap + createFromBuffer instead of createFromFile.
+// createFromFile reads the whole .mnn in 4 KB chunks and then merges them into
+// one contiguous buffer, transiently holding ~2x the model size in anonymous
+// (non-reclaimable) memory. Mapping the file read-only keeps that source as
+// clean, file-backed pages the kernel can reclaim under pressure, so the peak
+// anonymous footprint during load drops to the single owned buffer MNN copies
+// into. createFromBuffer copies the bytes, so the mapping can be released right
+// away. Falls back to createFromFile on any mmap-path failure.
+static MNN::Interpreter *createMnnInterpreterMmap(const char *path) {
+  int fd = open(path, O_RDONLY);
+  if (fd < 0) {
+    return MNN::Interpreter::createFromFile(path);
+  }
+  struct stat st{};
+  if (0 != fstat(fd, &st) || st.st_size <= 0) {
+    close(fd);
+    return MNN::Interpreter::createFromFile(path);
+  }
+  size_t size = static_cast<size_t>(st.st_size);
+  void *mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+  // The mapping holds its own file reference, so the fd can be closed now.
+  close(fd);
+  if (MAP_FAILED == mapped) {
+    return MNN::Interpreter::createFromFile(path);
+  }
+  // MNN copies the whole buffer once, sequentially; hint readahead to match.
+  madvise(mapped, size, MADV_SEQUENTIAL);
+  MNN::Interpreter *interpreter =
+      MNN::Interpreter::createFromBuffer(mapped, size);
+  munmap(mapped, size);
+  if (interpreter) {
+    // createFromFile sets a default external weight path; createFromBuffer does
+    // not. Mirror it so models that store weights in a companion ".weight" file
+    // still resolve them at session creation. Harmless when no such file
+    // exists.
+    interpreter->setExternalFile((std::string(path) + ".weight").c_str());
+  }
+  return interpreter;
+}
+
 namespace qnn {
 namespace tools {
 namespace sample_app {
@@ -321,105 +443,17 @@ std::vector<char> readFileForPatch(const std::string &filePath) {
   return buffer;
 }
 
-void writeFileForPatch(const std::string &filePath,
-                       const std::vector<char> &data) {
-  std::ofstream file(filePath, std::ios::binary);
-  if (!file.is_open()) {
-    throw std::runtime_error("Failed to open file for writing: " + filePath);
-  }
-  if (!data.empty()) {
-    if (!file.write(data.data(), data.size())) {
-      throw std::runtime_error("Failed to write file: " + filePath);
-    }
-  }
-}
-
-int applyZstdPatch(const std::string &oldFilePath,
-                   const std::string &patchFilePath,
-                   const std::string &newFilePath) {
-  try {
-    std::vector<char> oldFileBuffer = readFileForPatch(oldFilePath);
-    QNN_INFO("Read old file (%s): %zu bytes.", oldFilePath.c_str(),
-             oldFileBuffer.size());
-
-    std::vector<char> patchFileBuffer = readFileForPatch(patchFilePath);
-    QNN_INFO("Read patch file (%s): %zu bytes.", patchFilePath.c_str(),
-             patchFileBuffer.size());
-
-    if (patchFileBuffer.empty()) {
-      throw std::runtime_error("Patch file (" + patchFilePath +
-                               ") is empty or could not be read.");
-    }
-
-    unsigned long long const decompressedSize = ZSTD_getFrameContentSize(
-        patchFileBuffer.data(), patchFileBuffer.size());
-
-    if (decompressedSize == ZSTD_CONTENTSIZE_ERROR) {
-      throw std::runtime_error("Patch file (" + patchFilePath +
-                               ") is not a valid zstd frame.");
-    }
-    if (decompressedSize == ZSTD_CONTENTSIZE_UNKNOWN) {
-      throw std::runtime_error(
-          "Decompressed size is unknown. Cannot proceed with this simple "
-          "implementation.");
-    }
-
-    std::vector<char> newFileBuffer;
-    if (decompressedSize > 0) {
-      newFileBuffer.resize(decompressedSize);
-    } else {
-      writeFileForPatch(newFilePath, newFileBuffer);
-      QNN_INFO(
-          "Successfully applied patch (resulting in an empty file). New file "
-          "saved to: %s",
-          newFilePath.c_str());
-      return 0;
-    }
-
-    ZSTD_DCtx *const dctx = ZSTD_createDCtx();
-    if (dctx == nullptr) {
-      throw std::runtime_error("ZSTD_createDCtx() failed!");
-    }
-
-    size_t const actualDecompressedSize = ZSTD_decompress_usingDict(
-        dctx, newFileBuffer.data(), newFileBuffer.size(),
-        patchFileBuffer.data(), patchFileBuffer.size(), oldFileBuffer.data(),
-        oldFileBuffer.size());
-
-    ZSTD_freeDCtx(dctx);
-
-    if (ZSTD_isError(actualDecompressedSize)) {
-      throw std::runtime_error(
-          "ZSTD_decompress_usingDict() failed: " +
-          std::string(ZSTD_getErrorName(actualDecompressedSize)));
-    }
-
-    if (actualDecompressedSize != decompressedSize) {
-      if (actualDecompressedSize < newFileBuffer.size()) {
-        newFileBuffer.resize(actualDecompressedSize);
-      }
-    }
-
-    QNN_INFO("Decompressed %zu bytes into new file buffer.",
-             actualDecompressedSize);
-
-    writeFileForPatch(newFilePath, newFileBuffer);
-    QNN_INFO("Successfully applied patch. New file saved to: %s",
-             newFilePath.c_str());
-
-  } catch (const std::exception &e) {
-    QNN_ERROR("Error applying patch: %s", e.what());
-    return 1;
-  }
-  return 0;
-}
-
 std::unique_ptr<PatchedModelBuffer> applyZstdPatchToBuffer(
     const std::string &oldFilePath, const std::string &patchFilePath) {
   try {
-    std::vector<char> oldFileBuffer = readFileForPatch(oldFilePath);
-    QNN_INFO("Read old file (%s): %zu bytes.", oldFilePath.c_str(),
-             oldFileBuffer.size());
+    // The old model is only read (as the zstd dictionary), so map it read-only
+    // instead of pulling the whole multi-GB file into an anonymous buffer.
+    MmapFile oldFile(oldFilePath);
+    if (!oldFile.valid()) {
+      throw std::runtime_error("Failed to map old file: " + oldFilePath);
+    }
+    QNN_INFO("Mapped old file (%s): %zu bytes.", oldFilePath.c_str(),
+             oldFile.size);
 
     std::vector<char> patchFileBuffer = readFileForPatch(patchFilePath);
     QNN_INFO("Read patch file (%s): %zu bytes.", patchFilePath.c_str(),
@@ -458,7 +492,7 @@ std::unique_ptr<PatchedModelBuffer> applyZstdPatchToBuffer(
 
     size_t const actualDecompressedSize = ZSTD_decompress_usingDict(
         dctx, newBuffer, decompressedSize, patchFileBuffer.data(),
-        patchFileBuffer.size(), oldFileBuffer.data(), oldFileBuffer.size());
+        patchFileBuffer.size(), oldFile.data, oldFile.size);
 
     ZSTD_freeDCtx(dctx);
 
@@ -742,7 +776,7 @@ void processCommandLine(int argc, char **argv) {
   // Post-CLI: load CLIP extras (pos_emb/token_emb) and auto-detect clip_v2 /
   // clip2 based on flags.
   auto loadTokenEmb = [](const std::filesystem::path &tokenEmbPath,
-                         std::vector<uint16_t> &dst, bool force_fp16) {
+                         TokenEmbTable &dst, bool force_fp16) {
     std::ifstream tokenFile(tokenEmbPath, std::ios::binary);
     tokenFile.seekg(0, std::ios::end);
     size_t fileSize = tokenFile.tellg();
@@ -750,23 +784,46 @@ void processCommandLine(int argc, char **argv) {
 
     const size_t SIZE_THRESHOLD = 100 * 1024 * 1024;  // 100MB
     if (!force_fp16 && fileSize > SIZE_THRESHOLD) {
+      // FP32 on disk: narrow to FP16 in an owned buffer (cannot be mapped as
+      // uint16 directly). This branch is the legacy SD1.5 large-table path.
       size_t tokenSize = fileSize / sizeof(float);
       std::vector<float> tempBuffer(tokenSize);
       tokenFile.read(reinterpret_cast<char *>(tempBuffer.data()), fileSize);
-      dst.resize(tokenSize);
+      std::vector<uint16_t> converted(tokenSize);
       for (size_t i = 0; i < tokenSize; i++) {
-        dst[i] = fp32_to_fp16(tempBuffer[i]);
+        converted[i] = fp32_to_fp16(tempBuffer[i]);
       }
+      dst.setOwned(std::move(converted));
       QNN_INFO("Loaded %s: %zu floats (converted FP32->FP16)",
                tokenEmbPath.filename().string().c_str(), tokenSize);
-    } else {
-      size_t tokenSize = fileSize / sizeof(uint16_t);
-      dst.resize(tokenSize);
-      tokenFile.read(reinterpret_cast<char *>(dst.data()), fileSize);
-      QNN_INFO("Loaded %s: %zu elements (FP16)",
-               tokenEmbPath.filename().string().c_str(), tokenSize);
+      return;
     }
+
+    // FP16 on disk: map read-only and look up lazily. Token lookups are
+    // sparse, so MADV_RANDOM avoids pointless readahead of untouched rows.
     tokenFile.close();
+    size_t tokenSize = fileSize / sizeof(uint16_t);
+    int fd = open(tokenEmbPath.c_str(), O_RDONLY);
+    void *mapped = MAP_FAILED;
+    if (fd >= 0) {
+      mapped = mmap(nullptr, fileSize, PROT_READ, MAP_PRIVATE, fd, 0);
+      close(fd);
+    }
+    if (mapped != MAP_FAILED) {
+      madvise(mapped, fileSize, MADV_RANDOM);
+      dst.setMapped(mapped, fileSize);
+      QNN_INFO("Mapped %s: %zu elements (FP16, mmap)",
+               tokenEmbPath.filename().string().c_str(), tokenSize);
+      return;
+    }
+
+    // Fallback: read into an owned buffer if the mapping failed.
+    std::ifstream fallback(tokenEmbPath, std::ios::binary);
+    std::vector<uint16_t> owned(tokenSize);
+    fallback.read(reinterpret_cast<char *>(owned.data()), fileSize);
+    dst.setOwned(std::move(owned));
+    QNN_INFO("Loaded %s: %zu elements (FP16)",
+             tokenEmbPath.filename().string().c_str(), tokenSize);
   };
 
   auto loadPosEmb = [](const std::filesystem::path &posEmbPath,
@@ -841,24 +898,24 @@ void processCommandLine(int argc, char **argv) {
 
   if (use_safety_checker) {
     safetyCheckerInterpreter =
-        MNN::Interpreter::createFromFile(safetyCheckerPath.c_str());
+        createMnnInterpreterMmap(safetyCheckerPath.c_str());
     if (!safetyCheckerInterpreter)
       showHelpAndExit("Failed load Safety MNN: " + safetyCheckerPath);
   }
 
   if (use_mnn_clip) {
-    clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
+    clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
     if (!clipInterpreter) showHelpAndExit("Failed load CLIP MNN: " + clipPath);
   }
 
   if (sdxl_mode && !lowram_mode) {
     // SDXL text encoders always run on MNN (CPU) regardless of backend.
     if (!clipInterpreter) {
-      clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
+      clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
       if (!clipInterpreter)
         showHelpAndExit("Failed load SDXL CLIP1 MNN: " + clipPath);
     }
-    clip2Interpreter = MNN::Interpreter::createFromFile(clip2Path.c_str());
+    clip2Interpreter = createMnnInterpreterMmap(clip2Path.c_str());
     if (!clip2Interpreter)
       showHelpAndExit("Failed load SDXL CLIP2 MNN: " + clip2Path);
   }
@@ -969,12 +1026,12 @@ struct ScopeExit {
 // --- SDXL low-RAM lazy load/release helpers ---
 static void loadSdxlClipMnnIfNeeded() {
   if (!clipInterpreter) {
-    clipInterpreter = MNN::Interpreter::createFromFile(clipPath.c_str());
+    clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
     if (!clipInterpreter)
       throw std::runtime_error("[lowram] Failed load SDXL CLIP1 MNN");
   }
   if (!clip2Interpreter) {
-    clip2Interpreter = MNN::Interpreter::createFromFile(clip2Path.c_str());
+    clip2Interpreter = createMnnInterpreterMmap(clip2Path.c_str());
     if (!clip2Interpreter)
       throw std::runtime_error("[lowram] Failed load SDXL CLIP2 MNN");
   }
@@ -1657,7 +1714,7 @@ xt::xarray<uint8_t> upscaleImageWithMNN(const std::vector<uint8_t> &input_image,
   const float scale_factor = 4.0f;
 
   auto interpreter = std::shared_ptr<MNN::Interpreter>(
-      MNN::Interpreter::createFromFile(model_path.c_str()));
+      createMnnInterpreterMmap(model_path.c_str()));
   if (!interpreter) {
     throw std::runtime_error("Failed to create MNN interpreter from: " +
                              model_path);
@@ -2023,8 +2080,7 @@ GenerationResult generateImage(
             throw std::runtime_error(
                 "Global clipInterpreter (hybrid) not initialized!");
         } else {
-          currentClipInterpreter =
-              MNN::Interpreter::createFromFile(clipPath.c_str());
+          currentClipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
           if (!currentClipInterpreter)
             throw std::runtime_error(
                 "Failed to create temporary MNN CLIP interpreter!");
@@ -2254,7 +2310,7 @@ GenerationResult generateImage(
         if (!loaded_from_cache) {
           if (use_mnn) {
             MNN::Interpreter *currentVaeEncoderInterpreter =
-                MNN::Interpreter::createFromFile(vaeEncoderPath.c_str());
+                createMnnInterpreterMmap(vaeEncoderPath.c_str());
             if (!currentVaeEncoderInterpreter)
               throw std::runtime_error("Failed MNN VAE Enc create");
 
@@ -2496,8 +2552,7 @@ GenerationResult generateImage(
     MNN::Session *currentUnetSession = nullptr;
 
     if (use_mnn) {
-      currentUnetInterpreter =
-          MNN::Interpreter::createFromFile(unetPath.c_str());
+      currentUnetInterpreter = createMnnInterpreterMmap(unetPath.c_str());
       if (!currentUnetInterpreter)
         throw std::runtime_error(
             "Failed to create temporary MNN UNET interpreter!");
@@ -2850,7 +2905,7 @@ GenerationResult generateImage(
 
       if (use_mnn) {
         MNN::Interpreter *currentVaeDecoderInterpreter =
-            MNN::Interpreter::createFromFile(vaeDecoderPath.c_str());
+            createMnnInterpreterMmap(vaeDecoderPath.c_str());
 
         if (!currentVaeDecoderInterpreter)
           throw std::runtime_error(
