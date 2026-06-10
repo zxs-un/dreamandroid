@@ -1,30 +1,30 @@
 [submodule "app/src/main/cpp/3rdparty/cpp-httplib"]
 	path = app/src/main/cpp/3rdparty/cpp-httplib
-	url = ../yhirose/cpp-httplib.git
+	url = ../../yhirose/cpp-httplib.git
 [submodule "app/src/main/cpp/3rdparty/json"]
 	path = app/src/main/cpp/3rdparty/json
-	url = ../nlohmann/json.git
+	url = ../../nlohmann/json.git
 [submodule "app/src/main/cpp/3rdparty/stb"]
 	path = app/src/main/cpp/3rdparty/stb
-	url = ../nothings/stb.git
+	url = ../../nothings/stb.git
 [submodule "app/src/main/cpp/3rdparty/xtensor"]
 	path = app/src/main/cpp/3rdparty/xtensor
-	url = ../xtensor-stack/xtensor.git
+	url = ../../xtensor-stack/xtensor.git
 [submodule "app/src/main/cpp/3rdparty/xtl"]
 	path = app/src/main/cpp/3rdparty/xtl
-	url = ../xtensor-stack/xtl.git
+	url = ../../xtensor-stack/xtl.git
 [submodule "app/src/main/cpp/3rdparty/MNN"]
 	path = app/src/main/cpp/3rdparty/MNN
-	url = ../alibaba/MNN.git
+	url = ../../alibaba/MNN.git
 [submodule "app/src/main/cpp/3rdparty/xsimd"]
 	path = app/src/main/cpp/3rdparty/xsimd
-	url = ../xtensor-stack/xsimd.git
+	url = ../../xtensor-stack/xsimd.git
 [submodule "app/src/main/cpp/3rdparty/zstd"]
 	path = app/src/main/cpp/3rdparty/zstd
-	url = ../facebook/zstd.git
+	url = ../../facebook/zstd.git
 [submodule "app/src/main/cpp/3rdparty/xtensor-blas"]
 	path = app/src/main/cpp/3rdparty/xtensor-blas
-	url = ../xtensor-stack/xtensor-blas.git
+	url = ../../xtensor-stack/xtensor-blas.git
 [submodule "app/src/main/cpp/3rdparty/tokenizers-cpp"]
 	path = app/src/main/cpp/3rdparty/tokenizers-cpp
-	url = ../xororz/tokenizers-cpp.git
+	url = ../../xororz/tokenizers-cpp.git
