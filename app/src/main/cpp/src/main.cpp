@@ -139,43 +139,46 @@ struct MmapFile {
   void *base_ = nullptr;
 };
 
+// The server runs exactly one of three fixed model formats, selected by
+// --type. Each format implies the full file layout under --model_dir, the
+// diffusion backend (MNN vs QNN), and the CLIP pipeline; nothing else is
+// configurable per component.
+//   sd15cpu: tokenizer.json clip_v2.mnn pos_emb.bin token_emb.bin
+//            unet.mnn vae_encoder.mnn vae_decoder.mnn
+//   sd15npu: tokenizer.json clip_v2.mnn pos_emb.bin token_emb.bin
+//            unet.bin vae_encoder.bin vae_decoder.bin [+resolution patches]
+//   sdxl:    tokenizer.json clip.mnn pos_emb.bin token_emb.bin clip_2.mnn
+//            pos_emb_2.bin token_emb_2.bin unet.bin vae_encoder.bin
+//            vae_decoder.bin
+// CLIP always runs on MNN (CPU) with precomputed token/pos embeddings.
 int port = 8081;
 std::string listen_address = "127.0.0.1";
 bool use_v_pred = false;
-bool use_mnn = false;
+bool use_mnn = false;    // --type sd15cpu: whole pipeline on MNN
+bool sdxl_mode = false;  // --type sdxl
 bool use_safety_checker = false;
-bool use_mnn_clip = false;
-bool use_clip_v2 = false;
 bool upscaler_mode = false;
-bool sdxl_mode = false;
 bool lowram_mode = false;
+bool no_img2img = false;  // skip the VAE encoder entirely
 float nsfw_threshold = 0.5f;
 std::string clipPath, clip2Path, unetPath, vaeDecoderPath, vaeEncoderPath,
-    safetyCheckerPath, tokenizerPath, patchPath, modelDir, upscalerPath;
+    safetyCheckerPath, tokenizerPath, patchPath, modelDir;
 std::vector<float> pos_emb;
 TokenEmbTable token_emb;  // FP16, mmap-backed when stored as FP16 on disk
 std::vector<float> pos_emb_2;
 TokenEmbTable token_emb_2;  // SDXL encoder 2 token embeddings (FP16)
 std::shared_ptr<tokenizers::Tokenizer> tokenizer;
 PromptProcessor promptProcessor;
-std::unique_ptr<QnnModel> clipApp = nullptr;
 std::unique_ptr<QnnModel> unetApp = nullptr;
 std::unique_ptr<QnnModel> vaeDecoderApp = nullptr;
 std::unique_ptr<QnnModel> vaeEncoderApp = nullptr;
-std::unique_ptr<QnnModel> upscalerApp = nullptr;
 MNN::Interpreter *clipInterpreter = nullptr;
 MNN::Interpreter *clip2Interpreter = nullptr;
-MNN::Interpreter *unetInterpreter = nullptr;
-MNN::Interpreter *vaeDecoderInterpreter = nullptr;
-MNN::Interpreter *vaeEncoderInterpreter = nullptr;
 MNN::Interpreter *safetyCheckerInterpreter = nullptr;
 
 // MNN Session Pointers
 MNN::Session *clipSession = nullptr;
 MNN::Session *clip2Session = nullptr;
-MNN::Session *unetSession = nullptr;
-MNN::Session *vaeDecoderSession = nullptr;
-MNN::Session *vaeEncoderSession = nullptr;
 MNN::Session *safetyCheckerSession = nullptr;
 
 std::string prompt;
@@ -252,14 +255,12 @@ struct PatchedModelBuffer {
 };
 
 std::unique_ptr<PatchedModelBuffer> g_unetPatchedBuffer;
-std::string model_dir;
 bool clip_skip_2 = false;
 
 // QNN function pointers and backend path for dynamic model loading
 QnnFunctionPointers g_qnnSystemFuncs;
 std::string g_backendPathCmd;
 
-// Returns "{model_dir}/cache", creating it if needed. Returns "" when
 // Count the UTF-16 code units in the first byteOffset bytes of a UTF-8 string.
 // The prompt is a Kotlin String on the client, indexed in UTF-16 units, so a
 // raw byte offset must be converted before it can address a character there.
@@ -327,6 +328,7 @@ static size_t prefixBytesWithinBudget(const std::string &text, int budget,
   return bounds[best];
 }
 
+// Returns "{model_dir}/cache", creating it if needed. Returns "" when
 // model_dir is empty or directory creation fails; callers must treat that
 // as "caching disabled for this run".
 static std::string ensureCacheDir(const std::string &model_dir) {
@@ -629,7 +631,42 @@ int initializeQnnApp(const std::string &modelName,
   return EXIT_SUCCESS;
 }
 
-void showHelp() {}
+void showHelp() {
+  std::cout
+      << "Usage:\n"
+         "  stable_diffusion_core --type <sd15cpu|sd15npu|sdxl> "
+         "--model_dir <dir> [--lib_dir <dir>] [options]\n"
+         "  stable_diffusion_core --upscaler_mode [--lib_dir <dir>] "
+         "[options]\n"
+         "  stable_diffusion_core --convert <dir> [--clip_skip_2]\n"
+         "\n"
+         "Modes:\n"
+         "  --type <type>          Model format: sd15cpu (MNN), sd15npu "
+         "(QNN), sdxl (QNN)\n"
+         "  --upscaler_mode        Upscale-only server, no diffusion model\n"
+         "  --convert <dir>        Convert model.safetensors in <dir> to MNN "
+         "and exit\n"
+         "\n"
+         "Paths:\n"
+         "  --model_dir <dir>      Directory with the fixed per-type model "
+         "files\n"
+         "  --lib_dir <dir>        Directory with libQnnHtp.so / "
+         "libQnnSystem.so (QNN types)\n"
+         "  --patch <file>         zstd resolution patch for unet.bin "
+         "(sd15npu)\n"
+         "  --safety_checker <f>   NSFW checker MNN model\n"
+         "\n"
+         "Options:\n"
+         "  --port <n>             HTTP port (default 8081)\n"
+         "  --listen_all           Listen on 0.0.0.0 instead of 127.0.0.1\n"
+         "  --no_img2img           Do not load the VAE encoder\n"
+         "  --use_v_pred           v-prediction model\n"
+         "  --lowram               (sdxl) load/release models per stage\n"
+         "  --clip_skip_2          (convert) export CLIP with skip 2\n"
+         "  --log_level <n>        QNN log level\n"
+         "  --version              Print QNN SDK build id\n"
+         "  --help                 Show this help\n";
+}
 
 void showHelpAndExit(std::string &&error) {
   std::cerr << "ERROR: " << error << "\n";
@@ -641,56 +678,41 @@ void showHelpAndExit(std::string &&error) {
 void processCommandLine(int argc, char **argv) {
   enum OPTIONS {
     OPT_HELP = 0,
-    OPT_CLIP = 21,
-    OPT_UNET = 22,
-    OPT_VAE_DECODER = 23,
-    OPT_TEXT_EMBEDDING_SIZE = 24,
-    OPT_USE_MNN = 25,
-    OPT_USE_V_PRED = 26,
-    OPT_SAFETY_CHECKER = 27,
-    OPT_USE_MNN_CLIP = 28,
-    OPT_VAE_ENCODER_ARG = 29,
-    OPT_CONVERT = 30,
-    OPT_CONVERT_CLIP_SKIP_2 = 31,
-    OPT_UPSCALER_MODE = 32,
-    OPT_SDXL = 33,
-    OPT_LOWRAM = 34,
-    OPT_BACKEND = 3,
-    OPT_LOG_LEVEL = 10,
-    OPT_VERSION = 13,
-    OPT_SYSTEM_LIBRARY = 14,
-    OPT_PORT = 15,
-    OPT_TOKENIZER = 16,
-    OPT_PATCH = 17,
-    OPT_LISTEN_ALL = 18
+    OPT_VERSION,
+    OPT_TYPE,
+    OPT_MODEL_DIR,
+    OPT_LIB_DIR,
+    OPT_PORT,
+    OPT_LISTEN_ALL,
+    OPT_NO_IMG2IMG,
+    OPT_USE_V_PRED,
+    OPT_SAFETY_CHECKER,
+    OPT_CONVERT,
+    OPT_CONVERT_CLIP_SKIP_2,
+    OPT_PATCH,
+    OPT_UPSCALER_MODE,
+    OPT_LOWRAM,
+    OPT_LOG_LEVEL
   };
   static struct pal::Option s_longOptions[] = {
       {"help", pal::no_argument, NULL, OPT_HELP},
+      {"version", pal::no_argument, NULL, OPT_VERSION},
+      {"type", pal::required_argument, NULL, OPT_TYPE},
+      {"model_dir", pal::required_argument, NULL, OPT_MODEL_DIR},
+      {"lib_dir", pal::required_argument, NULL, OPT_LIB_DIR},
       {"port", pal::required_argument, NULL, OPT_PORT},
       {"listen_all", pal::no_argument, NULL, OPT_LISTEN_ALL},
-      {"text_embedding_size", pal::required_argument, NULL,
-       OPT_TEXT_EMBEDDING_SIZE},
-      {"cpu", pal::no_argument, NULL, OPT_USE_MNN},
+      {"no_img2img", pal::no_argument, NULL, OPT_NO_IMG2IMG},
       {"use_v_pred", pal::no_argument, NULL, OPT_USE_V_PRED},
       {"safety_checker", pal::required_argument, NULL, OPT_SAFETY_CHECKER},
-      {"use_cpu_clip", pal::no_argument, NULL, OPT_USE_MNN_CLIP},
-      {"vae_encoder", pal::required_argument, NULL, OPT_VAE_ENCODER_ARG},
       {"convert", pal::required_argument, NULL, OPT_CONVERT},
       {"clip_skip_2", pal::no_argument, NULL, OPT_CONVERT_CLIP_SKIP_2},
-      {"tokenizer", pal::required_argument, NULL, OPT_TOKENIZER},
-      {"clip", pal::required_argument, NULL, OPT_CLIP},
-      {"unet", pal::required_argument, NULL, OPT_UNET},
-      {"vae_decoder", pal::required_argument, NULL, OPT_VAE_DECODER},
-      {"backend", pal::required_argument, NULL, OPT_BACKEND},
-      {"log_level", pal::required_argument, NULL, OPT_LOG_LEVEL},
-      {"system_library", pal::required_argument, NULL, OPT_SYSTEM_LIBRARY},
-      {"version", pal::no_argument, NULL, OPT_VERSION},
       {"patch", pal::required_argument, NULL, OPT_PATCH},
       {"upscaler_mode", pal::no_argument, NULL, OPT_UPSCALER_MODE},
-      {"sdxl", pal::no_argument, NULL, OPT_SDXL},
       {"lowram", pal::no_argument, NULL, OPT_LOWRAM},
+      {"log_level", pal::required_argument, NULL, OPT_LOG_LEVEL},
       {NULL, 0, NULL, 0}};
-  std::string backendPathCmd, systemLibraryPathCmd;
+  std::string typeStr, libDir;
   QnnLog_Level_t logLevel = QNN_LOG_LEVEL_ERROR;
   int longIndex = 0, opt = 0;
   while ((opt = pal::getOptLongOnly(argc, argv, "", s_longOptions,
@@ -704,24 +726,23 @@ void processCommandLine(int argc, char **argv) {
         std::cout << "QNN SDK " << qnn::tools::getBuildId() << "\n";
         std::exit(EXIT_SUCCESS);
         break;
-      case OPT_CLIP:
-        clipPath = pal::g_optArg;
-        modelDir = std::filesystem::path(clipPath).parent_path().string();
+      case OPT_TYPE:
+        typeStr = pal::g_optArg;
         break;
-      case OPT_UNET:
-        unetPath = pal::g_optArg;
+      case OPT_MODEL_DIR:
+        modelDir = pal::g_optArg;
         break;
-      case OPT_VAE_DECODER:
-        vaeDecoderPath = pal::g_optArg;
+      case OPT_LIB_DIR:
+        libDir = pal::g_optArg;
         break;
-      case OPT_BACKEND:
-        backendPathCmd = pal::g_optArg;
+      case OPT_PORT:
+        port = std::stoi(pal::g_optArg);
         break;
-      case OPT_TEXT_EMBEDDING_SIZE:
-        text_embedding_size = std::stoi(pal::g_optArg);
+      case OPT_LISTEN_ALL:
+        listen_address = "0.0.0.0";
         break;
-      case OPT_USE_MNN:
-        use_mnn = true;
+      case OPT_NO_IMG2IMG:
+        no_img2img = true;
         break;
       case OPT_USE_V_PRED:
         use_v_pred = true;
@@ -730,18 +751,21 @@ void processCommandLine(int argc, char **argv) {
         use_safety_checker = true;
         safetyCheckerPath = pal::g_optArg;
         break;
-      case OPT_USE_MNN_CLIP:
-        use_mnn_clip = true;
-        break;
-      case OPT_VAE_ENCODER_ARG:
-        vaeEncoderPath = pal::g_optArg;
-        break;
       case OPT_CONVERT:
         cvt_model = true;
-        model_dir = pal::g_optArg;
+        modelDir = pal::g_optArg;
         break;
       case OPT_CONVERT_CLIP_SKIP_2:
         clip_skip_2 = true;
+        break;
+      case OPT_PATCH:
+        patchPath = pal::g_optArg;
+        break;
+      case OPT_UPSCALER_MODE:
+        upscaler_mode = true;
+        break;
+      case OPT_LOWRAM:
+        lowram_mode = true;
         break;
       case OPT_LOG_LEVEL:
         logLevel = sample_app::parseLogLevel(pal::g_optArg);
@@ -750,57 +774,34 @@ void processCommandLine(int argc, char **argv) {
             showHelpAndExit("Unable to set log level.");
         }
         break;
-      case OPT_SYSTEM_LIBRARY:
-        systemLibraryPathCmd = pal::g_optArg;
-        break;
-      case OPT_PORT:
-        port = std::stoi(pal::g_optArg);
-        break;
-      case OPT_LISTEN_ALL:
-        listen_address = "0.0.0.0";
-        break;
-      case OPT_TOKENIZER:
-        tokenizerPath = pal::g_optArg;
-        break;
-      case OPT_PATCH:
-        patchPath = pal::g_optArg;
-        break;
-      case OPT_UPSCALER_MODE:
-        upscaler_mode = true;
-        break;
-      case OPT_SDXL:
-        sdxl_mode = true;
-        text_embedding_size = 768;
-        text_embedding_size_2 = 1280;
-        break;
-      case OPT_LOWRAM:
-        lowram_mode = true;
-        break;
       default:
         showHelpAndExit("Invalid argument passed.");
     }
   }
 
-  if (upscaler_mode) {
-    if (use_mnn) return;
-    if (systemLibraryPathCmd.empty())
-      showHelpAndExit("Requires --system_library for QNN");
-    if (backendPathCmd.empty()) showHelpAndExit("Requires --backend for QNN");
-
-    g_backendPathCmd = backendPathCmd;
+  // QNN backend stubs (HTP + system) are resolved inside --lib_dir.
+  auto initQnn = [&libDir]() {
+    if (libDir.empty()) showHelpAndExit("Missing --lib_dir for QNN");
+    std::filesystem::path lib(libDir);
+    g_backendPathCmd = (lib / "libQnnHtp.so").string();
     dynamicloadutil::StatusCode sysStatus =
-        dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPathCmd,
-                                                      &g_qnnSystemFuncs);
+        dynamicloadutil::getQnnSystemFunctionPointers(
+            (lib / "libQnnSystem.so").string(), &g_qnnSystemFuncs);
     if (sysStatus != dynamicloadutil::StatusCode::SUCCESS)
       showHelpAndExit("Failed get QNN system func ptrs.");
+  };
+
+  if (upscaler_mode) {
+    // QNN upscalers need --lib_dir; MNN-only upscaling runs without it.
+    if (!libDir.empty()) initQnn();
     return;
   }
   if (cvt_model) {
-    if (!std::filesystem::exists(model_dir)) {
-      showHelpAndExit("Model directory does not exist: " + model_dir);
+    if (!std::filesystem::exists(modelDir)) {
+      showHelpAndExit("Model directory does not exist: " + modelDir);
     }
     std::string model_name = "model.safetensors";
-    auto model_path = std::filesystem::path(model_dir) / model_name;
+    auto model_path = std::filesystem::path(modelDir) / model_name;
     if (!std::filesystem::exists(model_path)) {
       showHelpAndExit("Model file does not exist");
     }
@@ -809,14 +810,14 @@ void processCommandLine(int argc, char **argv) {
     std::vector<float> lora_weights;
     for (int i = 1;; ++i) {
       std::string lora_filename = "lora." + std::to_string(i) + ".safetensors";
-      auto lora_path = std::filesystem::path(model_dir) / lora_filename;
+      auto lora_path = std::filesystem::path(modelDir) / lora_filename;
       if (!std::filesystem::exists(lora_path)) {
         break;
       }
       loras.push_back(lora_filename);
 
       std::string weight_filename = "lora." + std::to_string(i) + ".weight";
-      auto weight_path = std::filesystem::path(model_dir) / weight_filename;
+      auto weight_path = std::filesystem::path(modelDir) / weight_filename;
       float weight = 1.0f;
 
       if (std::filesystem::exists(weight_path)) {
@@ -829,19 +830,50 @@ void processCommandLine(int argc, char **argv) {
       lora_weights.push_back(weight);
     }
 
-    generateMNNModels(model_dir, model_name, clip_skip_2, loras, lora_weights);
+    generateMNNModels(modelDir, model_name, clip_skip_2, loras, lora_weights);
     exit(EXIT_SUCCESS);
   }
-  if (clipPath.empty() || unetPath.empty() || vaeDecoderPath.empty())
-    showHelpAndExit("Missing required model paths");
-  if (tokenizerPath.empty()) showHelpAndExit("Missing --tokenizer");
+
+  if (typeStr == "sd15cpu")
+    use_mnn = true;
+  else if (typeStr == "sdxl")
+    sdxl_mode = true;
+  else if (typeStr != "sd15npu")
+    showHelpAndExit(typeStr.empty() ? "Missing --type"
+                                    : "Invalid --type: " + typeStr);
+  if (modelDir.empty()) showHelpAndExit("Missing --model_dir");
   if (use_safety_checker && safetyCheckerPath.empty())
     showHelpAndExit("Missing safety checker path");
-  if (vaeEncoderPath.empty())
-    QNN_WARN("VAE Encoder path missing. img2img disabled unless --cpu");
 
-  // Post-CLI: load CLIP extras (pos_emb/token_emb) and auto-detect clip_v2 /
-  // clip2 based on flags.
+  // Fixed per-type file layout under --model_dir.
+  const std::filesystem::path dir(modelDir);
+  const std::string ext = use_mnn ? ".mnn" : ".bin";
+  tokenizerPath = (dir / "tokenizer.json").string();
+  clipPath = (dir / (sdxl_mode ? "clip.mnn" : "clip_v2.mnn")).string();
+  unetPath = (dir / ("unet" + ext)).string();
+  vaeDecoderPath = (dir / ("vae_decoder" + ext)).string();
+  if (!no_img2img) vaeEncoderPath = (dir / ("vae_encoder" + ext)).string();
+  if (sdxl_mode) clip2Path = (dir / "clip_2.mnn").string();
+
+  std::vector<std::string> required = {
+      tokenizerPath,
+      clipPath,
+      unetPath,
+      vaeDecoderPath,
+      (dir / "pos_emb.bin").string(),
+      (dir / "token_emb.bin").string(),
+  };
+  if (!vaeEncoderPath.empty()) required.push_back(vaeEncoderPath);
+  if (sdxl_mode) {
+    required.push_back(clip2Path);
+    required.push_back((dir / "pos_emb_2.bin").string());
+    required.push_back((dir / "token_emb_2.bin").string());
+  }
+  for (const auto &p : required) {
+    if (!std::filesystem::exists(p)) showHelpAndExit("File not found: " + p);
+  }
+
+  // Load the precomputed CLIP token/position embedding tables.
   auto loadTokenEmb = [](const std::filesystem::path &tokenEmbPath,
                          TokenEmbTable &dst, bool force_fp16) {
     std::ifstream tokenFile(tokenEmbPath, std::ios::binary);
@@ -906,61 +938,13 @@ void processCommandLine(int argc, char **argv) {
              posSize);
   };
 
+  loadPosEmb(dir / "pos_emb.bin", pos_emb);
+  // SD1.5 token_emb may still be legacy FP32 (detected by file size); SDXL
+  // tables are always FP16.
+  loadTokenEmb(dir / "token_emb.bin", token_emb, /*force_fp16=*/sdxl_mode);
   if (sdxl_mode) {
-    // SDXL: expect clip.mnn, clip_2.mnn, pos_emb.bin, pos_emb_2.bin,
-    // token_emb.bin, token_emb_2.bin in the same dir as --clip.
-    std::filesystem::path clipPathObj(clipPath);
-    std::filesystem::path parentDir = clipPathObj.parent_path();
-
-    std::filesystem::path clip2PathFs = parentDir / "clip_2.mnn";
-    std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
-    std::filesystem::path posEmbPath2 = parentDir / "pos_emb_2.bin";
-    std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
-    std::filesystem::path tokenEmbPath2 = parentDir / "token_emb_2.bin";
-
-    if (!std::filesystem::exists(clip2PathFs))
-      showHelpAndExit("clip_2.mnn not found: " + clip2PathFs.string());
-    if (!std::filesystem::exists(posEmbPath))
-      showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
-    if (!std::filesystem::exists(posEmbPath2))
-      showHelpAndExit("pos_emb_2.bin not found: " + posEmbPath2.string());
-    if (!std::filesystem::exists(tokenEmbPath))
-      showHelpAndExit("token_emb.bin not found: " + tokenEmbPath.string());
-    if (!std::filesystem::exists(tokenEmbPath2))
-      showHelpAndExit("token_emb_2.bin not found: " + tokenEmbPath2.string());
-
-    clip2Path = clip2PathFs.string();
-    use_clip_v2 = true;  // SDXL always feeds pre-computed embeddings to CLIP
-
-    loadPosEmb(posEmbPath, pos_emb);
-    loadPosEmb(posEmbPath2, pos_emb_2);
-    // SDXL token_emb always FP16, skip threshold detection
-    loadTokenEmb(tokenEmbPath, token_emb, /*force_fp16=*/true);
-    loadTokenEmb(tokenEmbPath2, token_emb_2, /*force_fp16=*/true);
-  } else if (clipPath.length() >= 8 &&
-             clipPath.substr(clipPath.length() - 8) == "clip.mnn") {
-    // SD1.5: auto-upgrade to clip_v2.mnn if present alongside.
-    std::filesystem::path clipPathObj(clipPath);
-    std::filesystem::path parentDir = clipPathObj.parent_path();
-    std::filesystem::path v2Path = parentDir / "clip_v2.mnn";
-
-    if (std::filesystem::exists(v2Path)) {
-      QNN_INFO("Found clip_v2.mnn, upgrading from %s to %s", clipPath.c_str(),
-               v2Path.string().c_str());
-      clipPath = v2Path.string();
-      use_clip_v2 = true;
-
-      std::filesystem::path posEmbPath = parentDir / "pos_emb.bin";
-      std::filesystem::path tokenEmbPath = parentDir / "token_emb.bin";
-
-      if (!std::filesystem::exists(posEmbPath))
-        showHelpAndExit("pos_emb.bin not found: " + posEmbPath.string());
-      if (!std::filesystem::exists(tokenEmbPath))
-        showHelpAndExit("token_emb.bin not found: " + tokenEmbPath.string());
-
-      loadPosEmb(posEmbPath, pos_emb);
-      loadTokenEmb(tokenEmbPath, token_emb, /*force_fp16=*/false);
-    }
+    loadPosEmb(dir / "pos_emb_2.bin", pos_emb_2);
+    loadTokenEmb(dir / "token_emb_2.bin", token_emb_2, /*force_fp16=*/true);
   }
 
   if (use_safety_checker) {
@@ -970,18 +954,17 @@ void processCommandLine(int argc, char **argv) {
       showHelpAndExit("Failed load Safety MNN: " + safetyCheckerPath);
   }
 
-  if (use_mnn_clip) {
+  // CLIP always runs on MNN. sd15npu keeps a persistent interpreter, sd15cpu
+  // reloads it per request to keep idle memory low, and SDXL keeps both
+  // encoders resident unless --lowram.
+  if (!use_mnn && !sdxl_mode) {
     clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
     if (!clipInterpreter) showHelpAndExit("Failed load CLIP MNN: " + clipPath);
   }
-
   if (sdxl_mode && !lowram_mode) {
-    // SDXL text encoders always run on MNN (CPU) regardless of backend.
-    if (!clipInterpreter) {
-      clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
-      if (!clipInterpreter)
-        showHelpAndExit("Failed load SDXL CLIP1 MNN: " + clipPath);
-    }
+    clipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
+    if (!clipInterpreter)
+      showHelpAndExit("Failed load SDXL CLIP1 MNN: " + clipPath);
     clip2Interpreter = createMnnInterpreterMmap(clip2Path.c_str());
     if (!clip2Interpreter)
       showHelpAndExit("Failed load SDXL CLIP2 MNN: " + clip2Path);
@@ -991,17 +974,7 @@ void processCommandLine(int argc, char **argv) {
     return;
   }
 
-  if (systemLibraryPathCmd.empty())
-    showHelpAndExit("Requires --system_library for QNN");
-  if (backendPathCmd.empty()) showHelpAndExit("Requires --backend for QNN");
-
-  // Store in global variables for dynamic model loading
-  g_backendPathCmd = backendPathCmd;
-  dynamicloadutil::StatusCode sysStatus =
-      dynamicloadutil::getQnnSystemFunctionPointers(systemLibraryPathCmd,
-                                                    &g_qnnSystemFuncs);
-  if (sysStatus != dynamicloadutil::StatusCode::SUCCESS)
-    showHelpAndExit("Failed get QNN system func ptrs.");
+  initQnn();
 
   if (!patchPath.empty()) {
     QNN_INFO("Applying patch to unet model in memory...");
@@ -1051,11 +1024,6 @@ void processCommandLine(int argc, char **argv) {
     }
   }
 
-  if (!use_mnn_clip && !sdxl_mode) {
-    clipApp = createQnnModel(clipPath, "clip");
-    if (!clipApp) showHelpAndExit("Failed create QNN CLIP model.");
-  }
-
   bool sdxl_lowram = sdxl_mode && lowram_mode;
 
   if (!sdxl_lowram) {
@@ -1069,7 +1037,7 @@ void processCommandLine(int argc, char **argv) {
       vaeEncoderApp = createQnnModel(vaeEncoderPath, "vae_encoder");
       if (!vaeEncoderApp) QNN_WARN("Failed create QNN VAE Enc model.");
     } else
-      QNN_WARN("VAE Enc QNN path missing.");
+      QNN_INFO("img2img disabled: VAE encoder not loaded");
   } else {
     QNN_INFO(
         "[lowram] SDXL low-RAM mode: skipping pre-load of UNET/VAE QNN models");
@@ -1245,9 +1213,8 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
       else if (sdxl_mode && !token.embedding_data_2.empty())
         emb_tokens = token.embedding_data_2.size() / dim2;
 
-      int pad_id = (text_embedding_size == 1024) ? 0 : 49407;
       for (int i = 0; i < emb_tokens && current_pos < max_len - 1; i++) {
-        ids.push_back(pad_id);
+        ids.push_back(49407);
         if (!token.embedding_data.empty()) {
           for (int j = 0; j < dim1; j++) {
             embeddings[current_pos * dim1 + j] =
@@ -1306,7 +1273,7 @@ ProcessedPrompt processWeightedPrompt(const std::string &prompt_text,
     result.ids_2 = ids2;
   }
 
-  if (use_clip_v2 && !token_emb.empty() && !pos_emb.empty()) {
+  if (!token_emb.empty() && !pos_emb.empty()) {
     for (int i = 0; i < max_len; i++) {
       int token_id = ids[i];
       float weight = (i < (int)weights.size()) ? weights[i] : 1.0f;
@@ -1941,10 +1908,7 @@ GenerationResult generateImage(
   bool sdxl_lowram = sdxl_mode && lowram_mode;
   if (!use_mnn) {
     if (!sdxl_mode) {
-      if (!use_mnn_clip && !clipApp)
-        throw std::runtime_error("QNN CLIP missing");
-      if (use_mnn_clip && !clipInterpreter)
-        throw std::runtime_error("MNN CLIP missing(hybrid)");
+      if (!clipInterpreter) throw std::runtime_error("MNN CLIP missing");
     } else if (!sdxl_lowram) {
       if (!clipInterpreter || !clip2Interpreter)
         throw std::runtime_error("SDXL MNN CLIP interpreters missing");
@@ -2061,7 +2025,6 @@ GenerationResult generateImage(
       auto parsed_input_text = tokenizer->Decode(clip_input_ids);
       QNN_INFO("Parsed Input Text: %s", parsed_input_text.c_str());
 
-      int32_t *input_ids_ptr = clip_input_ids.data();
       float *embed_ptr = text_embedding_float.data();
 
       if (sdxl_mode) {
@@ -2135,23 +2098,22 @@ GenerationResult generateImage(
               sdxl_text_embeds.data() + text_embedding_size_2);
         }
         if (sdxl_lowram) releaseSdxlClipMnn();
-      } else if (use_mnn || use_mnn_clip) {
-        MNN::Interpreter *currentClipInterpreter = nullptr;
-        MNN::Session *currentClipSession = nullptr;
+      } else {
+        // SD1.5: persistent CLIP session on NPU builds, per-request load on
+        // CPU builds to keep idle memory low.
+        MNN::Interpreter *currentClipInterpreter = clipInterpreter;
+        MNN::Session *currentClipSession = clipSession;
         bool dynamicCreated = false;
 
-        if (use_mnn_clip) {
-          currentClipInterpreter = clipInterpreter;
-          currentClipSession = clipSession;
-          if (!currentClipInterpreter)
-            throw std::runtime_error(
-                "Global clipInterpreter (hybrid) not initialized!");
-        } else {
+        if (use_mnn) {
           currentClipInterpreter = createMnnInterpreterMmap(clipPath.c_str());
           if (!currentClipInterpreter)
             throw std::runtime_error(
                 "Failed to create temporary MNN CLIP interpreter!");
+          currentClipSession = nullptr;
           dynamicCreated = true;
+        } else if (!currentClipInterpreter) {
+          throw std::runtime_error("Global clipInterpreter not initialized!");
         }
 
         bool sessionCreated = false;
@@ -2170,83 +2132,36 @@ GenerationResult generateImage(
           sessionCreated = true;
         }
 
-        if (use_clip_v2) {
-          auto input = currentClipInterpreter->getSessionInput(
-              currentClipSession, "input_embedding");
-          currentClipInterpreter->resizeTensor(input, {1, 77, 768});
-          currentClipInterpreter->resizeSession(currentClipSession);
+        auto input = currentClipInterpreter->getSessionInput(currentClipSession,
+                                                             "input_embedding");
+        currentClipInterpreter->resizeTensor(input, {1, 77, 768});
+        currentClipInterpreter->resizeSession(currentClipSession);
 
-          if (dynamicCreated) currentClipInterpreter->releaseModel();
+        if (dynamicCreated) currentClipInterpreter->releaseModel();
 
-          if (!neg_hit) {
-            memcpy(input->host<float>(), processed.negative_embeddings.data(),
-                   77 * 768 * sizeof(float));
-            currentClipInterpreter->runSession(currentClipSession);
-            auto out = currentClipInterpreter->getSessionOutput(
-                currentClipSession, "last_hidden_state");
-            memcpy(embed_ptr, out->host<float>(),
-                   77 * text_embedding_size * sizeof(float));
-          }
-
-          if (!pos_hit) {
-            memcpy(input->host<float>(), processed.positive_embeddings.data(),
-                   77 * 768 * sizeof(float));
-            currentClipInterpreter->runSession(currentClipSession);
-            auto out = currentClipInterpreter->getSessionOutput(
-                currentClipSession, "last_hidden_state");
-            memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
-                   77 * text_embedding_size * sizeof(float));
-          }
-
-          if (sessionCreated)
-            currentClipInterpreter->releaseSession(currentClipSession);
-          if (dynamicCreated) delete currentClipInterpreter;
-
-        } else {
-          auto input = currentClipInterpreter->getSessionInput(
-              currentClipSession, "input_ids");
-          currentClipInterpreter->resizeTensor(input, {1, 77});
-          currentClipInterpreter->resizeSession(currentClipSession);
-
-          if (dynamicCreated) currentClipInterpreter->releaseModel();
-
-          if (!neg_hit) {
-            memcpy(input->host<int>(), input_ids_ptr, 77 * sizeof(int32_t));
-            currentClipInterpreter->runSession(currentClipSession);
-            auto out = currentClipInterpreter->getSessionOutput(
-                currentClipSession, "last_hidden_state");
-            memcpy(embed_ptr, out->host<float>(),
-                   77 * text_embedding_size * sizeof(float));
-          }
-
-          if (!pos_hit) {
-            memcpy(input->host<int>(), input_ids_ptr + 77,
-                   77 * sizeof(int32_t));
-            currentClipInterpreter->runSession(currentClipSession);
-            auto out = currentClipInterpreter->getSessionOutput(
-                currentClipSession, "last_hidden_state");
-            memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
-                   77 * text_embedding_size * sizeof(float));
-          }
-
-          if (sessionCreated)
-            currentClipInterpreter->releaseSession(currentClipSession);
-          if (dynamicCreated) delete currentClipInterpreter;
-        }
-      } else {
-        if (!clipApp)
-          throw std::runtime_error("Global clipApp not initialized!");
         if (!neg_hit) {
-          if (StatusCode::SUCCESS !=
-              clipApp->executeClipGraphs(input_ids_ptr, embed_ptr))
-            throw std::runtime_error("QNN CLIP exec failed (neg)");
+          memcpy(input->host<float>(), processed.negative_embeddings.data(),
+                 77 * 768 * sizeof(float));
+          currentClipInterpreter->runSession(currentClipSession);
+          auto out = currentClipInterpreter->getSessionOutput(
+              currentClipSession, "last_hidden_state");
+          memcpy(embed_ptr, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
         }
+
         if (!pos_hit) {
-          if (StatusCode::SUCCESS !=
-              clipApp->executeClipGraphs(input_ids_ptr + 77,
-                                         embed_ptr + 77 * text_embedding_size))
-            throw std::runtime_error("QNN CLIP exec failed (pos)");
+          memcpy(input->host<float>(), processed.positive_embeddings.data(),
+                 77 * 768 * sizeof(float));
+          currentClipInterpreter->runSession(currentClipSession);
+          auto out = currentClipInterpreter->getSessionOutput(
+              currentClipSession, "last_hidden_state");
+          memcpy(embed_ptr + 77 * text_embedding_size, out->host<float>(),
+                 77 * text_embedding_size * sizeof(float));
         }
+
+        if (sessionCreated)
+          currentClipInterpreter->releaseSession(currentClipSession);
+        if (dynamicCreated) delete currentClipInterpreter;
       }
 
       // Persist freshly-computed CLIP outputs (per side). Sides that used a
@@ -3291,21 +3206,15 @@ int main(int argc, char **argv) {
     MNN::ScheduleConfig cfg_mnn_clip = cfg_common;
     cfg_mnn_clip.numThread = 4;
 
-    if (use_mnn_clip && clipInterpreter && !sdxl_mode) {
+    if (!sdxl_mode && clipInterpreter) {
       clipSession = clipInterpreter->createSession(cfg_mnn_clip);
       if (!clipSession)
-        QNN_ERROR("Failed create persistent MNN CLIP session (hybrid)!");
+        QNN_ERROR("Failed create persistent MNN CLIP session!");
       else {
-        QNN_INFO("Persistent MNN CLIP session (hybrid) created.");
-        if (use_clip_v2) {
-          auto input =
-              clipInterpreter->getSessionInput(clipSession, "input_embedding");
-          clipInterpreter->resizeTensor(input, {1, 77, 768});
-        } else {
-          auto input =
-              clipInterpreter->getSessionInput(clipSession, "input_ids");
-          clipInterpreter->resizeTensor(input, {1, 77});
-        }
+        QNN_INFO("Persistent MNN CLIP session created.");
+        auto input =
+            clipInterpreter->getSessionInput(clipSession, "input_embedding");
+        clipInterpreter->resizeTensor(input, {1, 77, 768});
         clipInterpreter->resizeSession(clipSession);
         clipInterpreter->releaseModel();
       }
@@ -3350,10 +3259,6 @@ int main(int argc, char **argv) {
     // --- Initialize QNN Models ---
     if (!use_mnn) {
       int status = EXIT_SUCCESS;
-      if (!use_mnn_clip && clipApp) {
-        status = sample_app::initializeQnnApp("CLIP", clipApp);
-        if (status != EXIT_SUCCESS) return status;
-      }
       if (unetApp) {
         if (g_unetPatchedBuffer && g_unetPatchedBuffer->buffer) {
           status = sample_app::initializeQnnApp(
@@ -3375,10 +3280,6 @@ int main(int argc, char **argv) {
       }
       if (vaeEncoderApp) {
         status = sample_app::initializeQnnApp("VAEEncoder", vaeEncoderApp);
-        if (status != EXIT_SUCCESS) return status;
-      }
-      if (upscalerApp) {
-        status = sample_app::initializeQnnApp("Upscaler", upscalerApp);
         if (status != EXIT_SUCCESS) return status;
       }
     }
@@ -3974,22 +3875,15 @@ int main(int argc, char **argv) {
   clipSession = nullptr;
   if (clip2Session) clip2Interpreter->releaseSession(clip2Session);
   clip2Session = nullptr;
-  if (unetSession) unetInterpreter->releaseSession(unetSession);
-  unetSession = nullptr;
   if (safetyCheckerSession)
     safetyCheckerInterpreter->releaseSession(safetyCheckerSession);
   safetyCheckerSession = nullptr;
   delete clipInterpreter;
   delete clip2Interpreter;
-  delete unetInterpreter;
-  delete vaeDecoderInterpreter;
-  delete vaeEncoderInterpreter;
   delete safetyCheckerInterpreter;
-  clipApp.reset();
   unetApp.reset();
   vaeDecoderApp.reset();
   vaeEncoderApp.reset();
-  upscalerApp.reset();
 
   return EXIT_SUCCESS;
 }

@@ -165,10 +165,8 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                 var command = listOf(
                     executableFile.absolutePath,
                     "--upscaler_mode",
-                    "--backend",
-                    File(runtimeDir, "libQnnHtp.so").absolutePath,
-                    "--system_library",
-                    File(runtimeDir, "libQnnSystem.so").absolutePath,
+                    "--lib_dir",
+                    runtimeDir.absolutePath,
                     "--port",
                     "8081",
                 )

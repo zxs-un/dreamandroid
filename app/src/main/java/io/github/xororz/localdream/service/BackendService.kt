@@ -244,22 +244,22 @@ class BackendService : Service() {
             val useImg2img = preferences.getBoolean("use_img2img", true)
             val listenOnAll = preferences.getBoolean("listen_on_all_addresses", false)
 
-            var clipfilename = "clip.bin"
-            if (model.useCpuClip) {
-                clipfilename = "clip.mnn"
-            }
-            var command = listOf(
+            val command = mutableListOf(
                 executableFile.absolutePath,
-                "--clip", File(modelsDir, clipfilename).absolutePath,
-                "--unet", File(modelsDir, "unet.bin").absolutePath,
-                "--vae_decoder", File(modelsDir, "vae_decoder.bin").absolutePath,
-                "--tokenizer", File(modelsDir, "tokenizer.json").absolutePath,
-                "--backend", File(runtimeDir, "libQnnHtp.so").absolutePath,
-                "--system_library", File(runtimeDir, "libQnnSystem.so").absolutePath,
-                "--port", "8081",
-                "--text_embedding_size", model.textEmbeddingSize.toString(),
+                "--type",
+                model.backendType,
+                "--model_dir",
+                modelsDir.absolutePath,
+                "--port",
+                "8081",
             )
-            if (!model.isSdxl && (width != 512 || height != 512)) {
+            if (!model.runOnCpu) {
+                command += listOf("--lib_dir", runtimeDir.absolutePath)
+            }
+            if (!useImg2img) {
+                command += "--no_img2img"
+            }
+            if (model.backendType == "sd15npu" && (width != 512 || height != 512)) {
                 val patchFile = if (width == height) {
                     val squarePatch = File(modelsDir, "$width.patch")
                     if (squarePatch.exists()) {
@@ -272,10 +272,7 @@ class BackendService : Service() {
                 }
 
                 if (patchFile.exists()) {
-                    command = command + listOf(
-                        "--patch",
-                        patchFile.absolutePath,
-                    )
+                    command += listOf("--patch", patchFile.absolutePath)
                     Log.i(TAG, "Using patch file: ${patchFile.name}")
                 } else {
                     Log.w(
@@ -284,51 +281,20 @@ class BackendService : Service() {
                     )
                 }
             }
-            if (useImg2img) {
-                command = command + listOf(
-                    "--vae_encoder",
-                    File(modelsDir, "vae_encoder.bin").absolutePath,
-                )
-            }
             if (File(modelsDir, "V_PRED").exists()) {
                 command += "--use_v_pred"
             }
-            if (model.useCpuClip) {
-                command += "--use_cpu_clip"
-            }
-            if (model.runOnCpu) {
-                command = listOf(
-                    executableFile.absolutePath,
-                    "--clip", File(modelsDir, "clip.mnn").absolutePath,
-                    "--unet", File(modelsDir, "unet.mnn").absolutePath,
-                    "--vae_decoder", File(modelsDir, "vae_decoder.mnn").absolutePath,
-                    "--tokenizer", File(modelsDir, "tokenizer.json").absolutePath,
-                    "--port", "8081",
-                    "--text_embedding_size", if (model.id != "sd21") "768" else "1024",
-                    "--cpu",
-                )
-                if (useImg2img) {
-                    command = command + listOf(
-                        "--vae_encoder",
-                        File(modelsDir, "vae_encoder.mnn").absolutePath,
-                    )
-                }
-            }
             if (BuildConfig.FLAVOR == "filter") {
-                command = command + listOf(
+                command += listOf(
                     "--safety_checker",
                     File(filesDir, "safety_checker.mnn").absolutePath,
                 )
             }
-            if (model.isSdxl) {
-                command = command + "--sdxl"
-                val lowRam = preferences.getBoolean("sdxl_lowram", true)
-                if (lowRam) {
-                    command = command + "--lowram"
-                }
+            if (model.isSdxl && preferences.getBoolean("sdxl_lowram", true)) {
+                command += "--lowram"
             }
             if (listenOnAll) {
-                command = command + "--listen_all"
+                command += "--listen_all"
             }
             val env = mutableMapOf<String, String>()
 

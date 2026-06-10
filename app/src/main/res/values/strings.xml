@@ -100,7 +100,7 @@
     <string name="npu_models">NPU Models</string>
     <string name="no_cpu_models">No Models</string>
     <string name="no_npu_models">No Models</string>
-    <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems.</string>
+    <string name="img2img_hint">Use img2img feature. Turn off if you don\'t need or encounter any problems. Turning it off also disables SDXL aspect ratio.</string>
     <string name="show_process">Show Generation Process</string>
     <string name="show_process_hint">Only works for NPU models. Show intermediate generation steps. This will slow down generation speed. Enable only when curious about the process.</string>
     <string name="preview_stride">Preview Stride</string>

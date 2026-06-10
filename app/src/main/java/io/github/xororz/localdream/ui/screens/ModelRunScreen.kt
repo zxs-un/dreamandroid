@@ -1493,7 +1493,9 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
             useOpenCL = prefs.useOpenCL
             batchCounts = prefs.batchCounts
             scheduler = prefs.scheduler
-            aspectRatio = prefs.aspectRatio
+            // Without img2img the backend has no VAE encoder, so a stored
+            // non-1:1 ratio would silently fall back to 1024x1024 anyway.
+            aspectRatio = if (useImg2img) prefs.aspectRatio else "1:1"
 
             currentWidth =
                 if (model?.isSdxl == true) {
@@ -2146,7 +2148,9 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                 .verticalScroll(rememberScrollState())
                                                 .padding(vertical = 4.dp),
                                         ) {
-                                            if (model?.isSdxl == true) {
+                                            // Aspect ratio needs the VAE encoder (inpaint-based
+                                            // padding), which --no_img2img does not load.
+                                            if (model?.isSdxl == true && useImg2img) {
                                                 Column(modifier = Modifier.fillMaxWidth()) {
                                                     Text(
                                                         stringResource(R.string.aspect_ratio),
@@ -4268,7 +4272,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 if (ParamShareField.DENOISE_STRENGTH in selectedFields) {
                     denoiseStrength = params.denoiseStrength
                 }
-                if (model?.isSdxl == true) {
+                if (model?.isSdxl == true && useImg2img) {
                     val newRatio = inferAspectRatioString(params.width, params.height)
                     if (newRatio != aspectRatio) {
                         aspectRatio = newRatio

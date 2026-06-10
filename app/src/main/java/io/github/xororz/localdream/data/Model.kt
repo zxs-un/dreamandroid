@@ -102,18 +102,23 @@ data class Model(
     val baseUrl: String,
     val fileUri: String = "",
     val generationSize: Int = 512,
-    val textEmbeddingSize: Int = 768,
     val approximateSize: String = "1GB",
     val isDownloaded: Boolean = false,
     val needsUpgrade: Boolean = false,
     val defaultPrompt: String = "",
     val defaultNegativePrompt: String = "",
     val runOnCpu: Boolean = false,
-    val useCpuClip: Boolean = false,
     val isCustom: Boolean = false,
     val isSdxl: Boolean = false,
 
 ) {
+    // Backend --type value; each type implies the full model file layout.
+    val backendType: String
+        get() = when {
+            isSdxl -> "sdxl"
+            runOnCpu -> "sd15cpu"
+            else -> "sd15npu"
+        }
 
     fun startDownload(context: Context) {
         if (isCustom || fileUri.isEmpty()) return
@@ -381,7 +386,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "masterpiece, best quality, a cat sat on a mat,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = !isNpu,
-            useCpuClip = true,
             isCustom = true,
             isSdxl = isSdxl,
         )
@@ -430,7 +434,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "masterpiece, best quality, a majestic cat sitting on a windowsill at sunset,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry,",
             runOnCpu = false,
-            useCpuClip = true,
             isSdxl = true,
         )
     }
@@ -453,7 +456,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "1girl, solo, blue twintails, very long hair, bangs, blue eyes, jewelry, necklace, hair bow, off-shoulder white frilled dress, bare shoulders, collarbone, underwater, floating hair, reaching towards viewer, air bubbles, blue theme, blurry foreground, masterpiece",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = false,
-            useCpuClip = true,
             isSdxl = true,
         )
     }
@@ -479,7 +481,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
             runOnCpu = false,
-            useCpuClip = true,
         )
     }
 
@@ -522,7 +523,6 @@ class ModelRepository(private val context: Context) {
             needsUpgrade = needsUpgrade,
             defaultPrompt = "chibi, best quality, 1girl, solo, cute, pink hair,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
-            useCpuClip = true,
         )
     }
 
@@ -564,7 +564,6 @@ class ModelRepository(private val context: Context) {
             needsUpgrade = needsUpgrade,
             defaultPrompt = "masterpiece, best quality, 1girl, solo, cute, white hair,",
             defaultNegativePrompt = "lowres, bad anatomy, bad hands, missing fingers, extra fingers, bad arms, missing legs, missing arms, poorly drawn face, bad face, fused face, cloned face, three crus, fused feet, fused thigh, extra crus, ugly fingers, horn, realistic photo, huge eyes, worst face, 2girl, long fingers, disconnected limbs,",
-            useCpuClip = true,
         )
     }
 
@@ -607,7 +606,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "masterpiece, best quality, ultra-detailed, realistic, 8k, a cat on grass,",
             defaultNegativePrompt = "worst quality, low quality, normal quality, poorly drawn, lowres, low resolution, signature, watermarks, ugly, out of focus, error, blurry, unclear photo, bad photo, unrealistic, semi realistic, pixelated, cartoon, anime, cgi, drawing, 2d, 3d, censored, duplicate,",
             runOnCpu = false,
-            useCpuClip = true,
         )
     }
 
@@ -650,7 +648,6 @@ class ModelRepository(private val context: Context) {
             defaultPrompt = "RAW photo, best quality, realistic, photo-realistic, masterpiece, 1girl, upper body, facing front, portrait, white shirt",
             defaultNegativePrompt = "paintings, cartoon, anime, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, skin spots, acnes, skin blemishes",
             runOnCpu = false,
-            useCpuClip = true,
         )
     }
 
