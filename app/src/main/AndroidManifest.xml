@@ -20,7 +20,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
-        android:name=".LocalDreamApplication"
+        android:name=".DreamAndroidApplication"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:enableOnBackInvokedCallback="true"
@@ -31,7 +31,7 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LocalDream"
+        android:theme="@style/Theme.DreamAndroid"
         tools:targetApi="33">
 
         <activity
@@ -39,7 +39,7 @@
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
             android:exported="true"
             android:screenOrientation="portrait"
-            android:theme="@style/Theme.LocalDream"
+            android:theme="@style/Theme.DreamAndroid"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

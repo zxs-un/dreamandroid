@@ -4,8 +4,14 @@ project(libstable_diffusion_core.so C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# QNN SDK PATH
-set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
+# QNN SDK PATH (override via env QNN_SDK_ROOT or -DQNN_SDK_ROOT=...)
+if(NOT DEFINED QNN_SDK_ROOT)
+    if(DEFINED ENV{QNN_SDK_ROOT})
+        set(QNN_SDK_ROOT $ENV{QNN_SDK_ROOT})
+    else()
+        set(QNN_SDK_ROOT /data/qairt/2.39.0.250926)
+    endif()
+endif()
 
 file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)

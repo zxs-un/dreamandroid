@@ -1,6 +1,6 @@
 <div align="center">
 
-# Local Dream <img src="./assets/icon.png" width="32" alt="Local Dream">
+# dreamandroid <img src="./assets/icon.png" width="32" alt="dreamandroid">
 
 **Android Stable Diffusion with Snapdragon NPU acceleration**  
 _Also supports CPU/GPU inference_
@@ -25,7 +25,7 @@ If you like it, please consider [sponsor](#-support-this-project) this project.
 >
 > If your chip is outside the above scope, you can only run SD1.5 on CPU/GPU.
 >
-> You can join our [telegram group](https://t.me/local_dream) for discussion or help with testing.
+> You can join our [telegram group](https://t.me/dreamandroid) for discussion or help with testing.
 
 ## User Guide
 
@@ -33,7 +33,7 @@ For certain reasons, all guides and documentation have been moved to [Guide Site
 
 ## Credits & Acknowledgments
 
-Local Dream is built on top of many excellent open-source projects. Sincere thanks to all the authors and contributors whose work made this project possible.
+dreamandroid is built on top of many excellent open-source projects. Sincere thanks to all the authors and contributors whose work made this project possible.
 
 ### C++ Libraries
 
@@ -64,7 +64,7 @@ Local Dream is built on top of many excellent open-source projects. Sincere than
 
 ## 💖 Support This Project
 
-If you find Local Dream useful, please consider supporting its development:
+If you find dreamandroid useful, please consider supporting its development:
 
 ### What Your Support Helps With:
 
@@ -72,11 +72,11 @@ If you find Local Dream useful, please consider supporting its development:
 - **New Features** - Enhanced functionality and capabilities
 - **Bug Fixes** - Continuous improvement and maintenance
 
-<a href="https://ko-fi.com/xororz">
+<a href="https://ko-fi.com/dreamandroid">
     <img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi2.png?v=3" border="0" alt="Buy Me a Coffee at ko-fi.com" />
 </a>
-<a href="https://afdian.com/a/xororz">
+<a href="https://afdian.com/a/dreamandroid">
     <img height="36" style="border-radius:12px;height:36px;" src="https://pic1.afdiancdn.com/static/img/welcome/button-sponsorme.jpg" alt="在爱发电支持我" />
 </a>
 
-Your sponsorship helps maintain and improve Local Dream for everyone!
+Your sponsorship helps maintain and improve dreamandroid for everyone!

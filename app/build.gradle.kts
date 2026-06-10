@@ -26,11 +26,11 @@ detekt {
 }
 
 android {
-    namespace = "io.github.xororz.localdream"
-    compileSdk = 37
+    namespace = "io.github.dreamandroid.local"
+    compileSdk = 35
 
     defaultConfig {
-        applicationId = "io.github.xororz.localdream"
+        applicationId = "io.github.dreamandroid.local"
         minSdk = 28
 //        minSdk = 31
         targetSdk = 36
@@ -49,10 +49,15 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file(project.findProperty("RELEASE_STORE_FILE") as String? ?: "keystore.jks")
-            storePassword = project.findProperty("RELEASE_STORE_PASSWORD") as String?
-            keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-            keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            // Use custom keystore if provided, otherwise fallback to debug keystore
+            val storeFileProp = project.findProperty("RELEASE_STORE_FILE") as String?
+            val storePassProp = project.findProperty("RELEASE_STORE_PASSWORD") as String?
+            if (!storeFileProp.isNullOrBlank() && !storePassProp.isNullOrBlank()) {
+                storeFile = file(storeFileProp)
+                storePassword = storePassProp
+                keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
+                keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            }
         }
     }
 
@@ -118,7 +123,7 @@ androidComponents {
         variant.outputs.forEach { output ->
             val versionName = output.versionName.orNull
             if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
-                output.outputFileName.set("LocalDream_armv8a_$versionName.apk")
+                output.outputFileName.set("dreamandroid_armv8a_$versionName.apk")
             }
         }
     }
