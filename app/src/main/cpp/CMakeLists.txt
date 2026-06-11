@@ -15,15 +15,19 @@ endif()
 
 file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
     DESTINATION ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp)
-execute_process(COMMAND git apply --directory=app/src/main/cpp/ --verbose ${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch
+execute_process(COMMAND git apply --reject --directory=app/src/main/cpp/ ${CMAKE_CURRENT_SOURCE_DIR}/SampleApp.patch
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     RESULT_VARIABLE patch_result
     OUTPUT_VARIABLE patch_output
     ERROR_VARIABLE patch_error
 )
-message(STATUS "Patch: ${patch_result}")
-message(STATUS "Patch: ${patch_output}")
-message(STATUS "Patch: ${patch_error}")
+if(NOT patch_result EQUAL 0)
+    message(WARNING "Patch partially failed — some hunks do not apply (SDK code diverged from original):")
+    message(WARNING "${patch_error}")
+    message(STATUS "${patch_output}")
+else()
+    message(STATUS "Patch applied successfully")
+endif()
 
 make_directory(${CMAKE_CURRENT_BINARY_DIR}/qnnlibs)
 file(COPY ${QNN_SDK_ROOT}/lib/aarch64-android/libQnnHtp.so
