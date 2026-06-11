@@ -601,11 +601,7 @@ private fun ToneFilterChip(selected: Boolean, onClick: () -> Unit, label: @Compo
         selected = selected,
         onClick = onClick,
         label = label,
-        shapes = FilterChipDefaults.shapes(
-            shape = CircleShape,
-            selectedShape = MaterialTheme.shapes.medium,
-            pressedShape = MaterialTheme.shapes.small,
-        ),
+        shape = CircleShape,
         leadingIcon = if (selected) {
             {
                 Icon(
@@ -625,7 +621,6 @@ private fun ToneFilterChip(selected: Boolean, onClick: () -> Unit, label: @Compo
             selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
         ),
         border = null,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
     )
 }
 
@@ -648,6 +643,5 @@ private fun ToneAssistChip(onClick: () -> Unit, active: Boolean = false, label: 
         ),
         border = null,
         shape = CircleShape,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
     )
 }

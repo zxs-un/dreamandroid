@@ -723,18 +723,16 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                         val helpLabel = stringResource(R.string.help)
                         val upscaleLabel = stringResource(R.string.image_upscale)
                         val settingsLabel = stringResource(R.string.settings)
-                        {
-                            IconButton(onClick = { showHelpDialog = true }) {
-                                Icon(Icons.AutoMirrored.Filled.Help, helpLabel)
+                        IconButton(onClick = { showHelpDialog = true }) {
+                            Icon(Icons.AutoMirrored.Filled.Help, helpLabel)
+                        }
+                        if (Model.isQualcommDevice()) {
+                            IconButton(onClick = { navController.navigate(Screen.Upscale.route) }) {
+                                Icon(Icons.Default.AutoFixHigh, upscaleLabel)
                             }
-                            if (Model.isQualcommDevice()) {
-                                IconButton(onClick = { navController.navigate(Screen.Upscale.route) }) {
-                                    Icon(Icons.Default.AutoFixHigh, upscaleLabel)
-                                }
-                            }
-                            IconButton(onClick = { showSettingsDialog = true }) {
-                                Icon(Icons.Default.Settings, settingsLabel)
-                            }
+                        }
+                        IconButton(onClick = { showSettingsDialog = true }) {
+                            Icon(Icons.Default.Settings, settingsLabel)
                         }
                     }
                 },

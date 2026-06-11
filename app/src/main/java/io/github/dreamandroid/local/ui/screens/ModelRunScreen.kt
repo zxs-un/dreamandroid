@@ -109,7 +109,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -2803,7 +2802,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                 label = "GenerateButtonContent",
                             ) { isLoading ->
                                 if (isLoading) {
-                                    LoadingIndicator(
+                                    CircularProgressIndicator(
                                         modifier = Modifier.size(24.dp),
                                         color = MaterialTheme.colorScheme.onPrimary,
                                     )
