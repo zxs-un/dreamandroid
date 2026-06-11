@@ -34,7 +34,7 @@ jobs:
   # Stage 1 — Code Checkout & C++ Compilation
   # ============================================================
   native:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     if: ${{ github.event.inputs.build_native == 'true' }}
 
@@ -53,19 +53,39 @@ jobs:
           ssh-key: ${{ secrets.QAIRT_DEPLOY_KEY }}
           path: qairt_sdk
 
-      # -------- NDK & build tools (pre-installed on ubuntu-24.04) --------
-      - name: Verify NDK & set up build tools
+      # -------- NDK & build tools (check version, install only if missing) --------
+      - name: Verify & set up NDK & build tools
         run: |
+          # --- NDK (exact version required) ---
           NDK_PATH="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
           if [ -d "$NDK_PATH" ]; then
-            echo "✅ NDK $ANDROID_NDK_VERSION found (pre-installed)"
+            echo "✅ NDK $ANDROID_NDK_VERSION found, skip download"
           else
             echo "⚠️  NDK $ANDROID_NDK_VERSION not found, downloading..."
             $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;$ANDROID_NDK_VERSION"
           fi
           echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
-          echo "System cmake: $(cmake --version | head -1)"
-          which ninja || sudo apt-get install -y -qq ninja-build
+
+          # --- cmake (require >= 3.22) ---
+          CMAKE_VER=$(cmake --version 2>/dev/null | grep -oP '\d+\.\d+' | head -1 || echo "0.0")
+          CMAKE_MAJOR=$(echo "$CMAKE_VER" | cut -d. -f1)
+          CMAKE_MINOR=$(echo "$CMAKE_VER" | cut -d. -f2)
+          if [ "$CMAKE_MAJOR" -gt 3 ] || { [ "$CMAKE_MAJOR" -eq 3 ] && [ "$CMAKE_MINOR" -ge 22 ]; }; then
+            echo "✅ cmake $CMAKE_VER meets requirement (>= 3.22), skip download"
+          else
+            echo "⚠️  cmake $CMAKE_VER < 3.22, installing..."
+            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "cmake;3.22.1"
+          fi
+
+          # --- ninja ---
+          if which ninja > /dev/null 2>&1; then
+            echo "✅ ninja $(ninja --version 2>/dev/null || echo 'ok') found, skip install"
+          else
+            echo "⚠️  ninja not found, installing..."
+            sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
+          fi
+
+          # --- ccache ---
           sudo apt-get install -y -qq ccache
 
       - name: Setup ccache
@@ -106,7 +126,7 @@ jobs:
   # Stage 2 — Kotlin Compile & APK Packaging
   # ============================================================
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: native
     if: always() && !cancelled()
@@ -116,15 +136,52 @@ jobs:
       - name: Checkout dreamandroid
         uses: actions/checkout@v4
 
-      # -------- JDK & Android SDK (pre-installed on ubuntu-24.04) --------
-      - name: Verify JDK & Android SDK
+      # -------- JDK & Android SDK (check version, install only if missing) --------
+      - name: Verify JDK
+        id: jdk
         run: |
-          echo "JDK: $(javac -version 2>&1)"  # JDK 17 is default
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          echo "--- Installed platforms ---"
-          ls $ANDROID_SDK_ROOT/platforms/
-          echo "--- Installed build-tools ---"
-          ls $ANDROID_SDK_ROOT/build-tools/
+          JAVAC_VER=$(javac -version 2>&1 | grep -oP '\d+' | head -1)
+          echo "System javac version: $JAVAC_VER"
+          if [ "$JAVAC_VER" -ge 17 ] 2>/dev/null; then
+            echo "✅ JDK $JAVAC_VER meets requirement (>= 17), skip install"
+            echo "need_jdk=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  JDK $JAVAC_VER < 17, needs install"
+            echo "need_jdk=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up JDK 17
+        if: steps.jdk.outputs.need_jdk == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Verify & set up Android SDK
+        run: |
+          TO_INSTALL=""
+          PLATFORM_DIR="$ANDROID_SDK_ROOT/platforms/android-36"
+          BT_DIR="$ANDROID_SDK_ROOT/build-tools/36.0.0"
+
+          if [ -d "$PLATFORM_DIR" ]; then
+            echo "✅ platforms;android-36 found, skip download"
+          else
+            echo "⚠️  platforms;android-36 not found"
+            TO_INSTALL="$TO_INSTALL platforms;android-36"
+          fi
+
+          if [ -d "$BT_DIR" ]; then
+            echo "✅ build-tools;36.0.0 found, skip download"
+          else
+            echo "⚠️  build-tools;36.0.0 not found"
+            TO_INSTALL="$TO_INSTALL build-tools;36.0.0"
+          fi
+
+          if [ -n "$TO_INSTALL" ]; then
+            echo "Installing:$TO_INSTALL"
+            yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
+            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install $TO_INSTALL
+          fi
 
       # -------- download native outputs (only if native job succeeded) --------
       - name: Download native artifacts
