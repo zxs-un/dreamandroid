@@ -56,7 +56,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -147,7 +146,7 @@ private fun DeleteConfirmDialog(selectedCount: Int, onConfirm: () -> Unit, onDis
 @Composable
 fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val resources = LocalResources.current
+    val resources = context.resources
     val scope = rememberCoroutineScope()
 
     // String resources hoisted to composable scope (lint: LocalContextGetResourceValueCall).
@@ -1005,10 +1004,6 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                     readOnly = selectedSource != "custom",
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .menuAnchor(
-                                            ExposedDropdownMenuAnchorType.PrimaryEditable,
-                                            enabled = true,
-                                        )
                                         .focusRequester(focusRequester)
                                         .onFocusChanged { focusState ->
                                             if (!focusState.isFocused && selectedSource == "custom") {

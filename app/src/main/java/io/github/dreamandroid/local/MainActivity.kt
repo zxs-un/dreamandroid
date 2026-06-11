@@ -36,8 +36,6 @@ import io.github.dreamandroid.local.ui.theme.sharedAxisXEnter
 import io.github.dreamandroid.local.ui.theme.sharedAxisXExit
 import io.github.dreamandroid.local.ui.theme.sharedAxisXPopEnter
 import io.github.dreamandroid.local.ui.theme.sharedAxisXPopExit
-import io.github.dreamandroid.local.ui.theme.sharedAxisXPredictivePopEnter
-import io.github.dreamandroid.local.ui.theme.sharedAxisXPredictivePopExit
 
 class MainActivity : ComponentActivity() {
     private val requestStoragePermissionLauncher = registerForActivityResult(
@@ -168,8 +166,6 @@ private fun AppContent() {
         exitTransition = { sharedAxisXExit() },
         popEnterTransition = { sharedAxisXPopEnter() },
         popExitTransition = { sharedAxisXPopExit() },
-        predictivePopEnterTransition = { _ -> sharedAxisXPredictivePopEnter() },
-        predictivePopExitTransition = { _ -> sharedAxisXPredictivePopExit() },
     ) {
         composable(Screen.ModelList.route) {
             ModelListScreen(navController)
