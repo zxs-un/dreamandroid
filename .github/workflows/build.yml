@@ -81,18 +81,25 @@ jobs:
           max-size: 2G
 
       # ============================================================
+      # Clone QNN SDK from private repo (deploy key)
+      # ============================================================
+      - name: Clone QNN SDK (private)
+        if: ${{ github.event.inputs.build_native == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/qairt
+          ssh-key: ${{ secrets.QAIRT_DEPLOY_KEY }}
+          path: qairt_sdk
+
+      # ============================================================
       # Native C++ Build (conditional - requires QNN SDK)
       # ============================================================
       - name: Build native C++ libraries
         if: ${{ github.event.inputs.build_native == 'true' }}
-        env:
-          QNN_SDK_ROOT: ${{ secrets.QNN_SDK_ROOT }}
         working-directory: app/src/main/cpp
         run: |
-          if [ -z "$QNN_SDK_ROOT" ]; then
-            echo "::error::QNN_SDK_ROOT secret is not set. Native build requires Qualcomm QNN SDK."
-            exit 1
-          fi
+          QNN_SDK_ROOT="${{ github.workspace }}/qairt_sdk"
+
           if [ ! -d "$QNN_SDK_ROOT" ]; then
             echo "::error::QNN SDK not found at $QNN_SDK_ROOT"
             exit 1
