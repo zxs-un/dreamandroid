@@ -124,15 +124,15 @@ jobs:
             "platforms;android-36" \
             "build-tools;36.0.0"
 
-      # -------- download native outputs (if built) --------
+      # -------- download native outputs (only if native job succeeded) --------
       - name: Download native artifacts
+        if: needs.native.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: native-libs
-        continue-on-error: true
 
       - name: Merge native outputs
-        if: hashFiles('jniLibs/arm64-v8a/*.so') != ''
+        if: needs.native.result == 'success'
         run: |
           mkdir -p app/src/main/jniLibs/
           mkdir -p app/src/main/assets/
@@ -150,10 +150,21 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
 
       - name: Gradle assemble
-        run: ./gradlew assembleBasicRelease -x ktlintCheck -x detekt
+        id: gradle-build
+        run: ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --info 2>&1 | tee build-log.txt
 
-      # -------- upload APK --------
+      # -------- upload build log (always, even on failure) --------
+      - name: Upload build log
+        if: always() && steps.gradle-build.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build-log.txt
+          retention-days: 7
+
+      # -------- upload APK (only on success) --------
       - name: Upload APK
+        if: steps.gradle-build.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: dreamandroid-APK
