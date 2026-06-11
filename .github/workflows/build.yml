@@ -121,8 +121,8 @@ jobs:
         run: |
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install --channel=3 \
-            "platforms;android-37" \
-            "build-tools;37.0.0"
+            "platforms;android-36" \
+            "build-tools;36.0.0"
 
       # -------- download native outputs (if built) --------
       - name: Download native artifacts
