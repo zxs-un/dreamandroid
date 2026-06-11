@@ -26,7 +26,8 @@ concurrency:
 
 env:
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-  ANDROID_NDK_VERSION: 28.0.13004108
+  # 28.2.13676358 is pre-installed on ubuntu-24.04 runner (no download needed)
+  ANDROID_NDK_VERSION: 28.2.13676358
 
 jobs:
   # ============================================================
@@ -52,15 +53,20 @@ jobs:
           ssh-key: ${{ secrets.QAIRT_DEPLOY_KEY }}
           path: qairt_sdk
 
-      # -------- NDK & build tools --------
-      - name: Install NDK & build tools
+      # -------- NDK & build tools (pre-installed on ubuntu-24.04) --------
+      - name: Verify NDK & set up build tools
         run: |
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install \
-            "ndk;${{ env.ANDROID_NDK_VERSION }}" \
-            "cmake;3.22.1"
-          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION" >> $GITHUB_ENV
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build ccache
+          NDK_PATH="$ANDROID_SDK_ROOT/ndk/$ANDROID_NDK_VERSION"
+          if [ -d "$NDK_PATH" ]; then
+            echo "✅ NDK $ANDROID_NDK_VERSION found (pre-installed)"
+          else
+            echo "⚠️  NDK $ANDROID_NDK_VERSION not found, downloading..."
+            $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;$ANDROID_NDK_VERSION"
+          fi
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> $GITHUB_ENV
+          echo "System cmake: $(cmake --version | head -1)"
+          which ninja || sudo apt-get install -y -qq ninja-build
+          sudo apt-get install -y -qq ccache
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1
@@ -110,19 +116,15 @@ jobs:
       - name: Checkout dreamandroid
         uses: actions/checkout@v4
 
-      # -------- JDK & Android SDK --------
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - name: Install Android SDK
+      # -------- JDK & Android SDK (pre-installed on ubuntu-24.04) --------
+      - name: Verify JDK & Android SDK
         run: |
+          echo "JDK: $(javac -version 2>&1)"  # JDK 17 is default
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install --channel=3 \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+          echo "--- Installed platforms ---"
+          ls $ANDROID_SDK_ROOT/platforms/
+          echo "--- Installed build-tools ---"
+          ls $ANDROID_SDK_ROOT/build-tools/
 
       # -------- download native outputs (only if native job succeeded) --------
       - name: Download native artifacts
