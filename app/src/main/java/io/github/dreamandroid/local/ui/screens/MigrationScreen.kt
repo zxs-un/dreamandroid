@@ -11,8 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
-import androidx.compose.material3.ContainedLoadingIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -49,7 +48,6 @@ fun MigrationScreen(state: MigrationState, onRetry: () -> Unit, onSkip: () -> Un
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ProgressContent(state: MigrationState) {
     Column(
@@ -100,7 +98,7 @@ private fun ProgressContent(state: MigrationState) {
             }
 
             else -> {
-                ContainedLoadingIndicator()
+                CircularProgressIndicator()
             }
         }
 

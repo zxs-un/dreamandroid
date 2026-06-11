@@ -26,11 +26,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
-import androidx.compose.material3.ButtonGroupDefaults
-import androidx.compose.material3.ContainedLoadingIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,7 +65,7 @@ enum class ToolMode {
 
 data class PathData(val points: List<Offset>, val size: Float, val mode: ToolMode, val color: Int = Color.WHITE)
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InpaintScreen(
     originalBitmap: Bitmap,
@@ -656,34 +651,28 @@ fun InpaintScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(
-                                    ButtonGroupDefaults.ConnectedSpaceBetween,
-                                ),
+                                horizontalArrangement = Arrangement.spacedBy(0.dp),
                             ) {
-                                ToggleButton(
-                                    checked = currentToolMode == ToolMode.BRUSH,
-                                    onCheckedChange = { if (it) currentToolMode = ToolMode.BRUSH },
-                                    shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Brush,
-                                        contentDescription = "Brush Tool",
-                                        modifier = Modifier.size(ToggleButtonDefaults.IconSize),
-                                    )
-                                }
-                                ToggleButton(
-                                    checked = currentToolMode == ToolMode.ERASER,
-                                    onCheckedChange = { if (it) currentToolMode = ToolMode.ERASER },
-                                    shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                                    contentPadding = PaddingValues(horizontal = 12.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.FormatPaint,
-                                        contentDescription = "Eraser Tool",
-                                        modifier = Modifier.size(ToggleButtonDefaults.IconSize),
-                                    )
-                                }
+                                FilterChip(
+                                    selected = currentToolMode == ToolMode.BRUSH,
+                                    onClick = { currentToolMode = ToolMode.BRUSH },
+                                    label = {
+                                        Icon(
+                                            Icons.Default.Brush,
+                                            contentDescription = "Brush Tool",
+                                        )
+                                    },
+                                )
+                                FilterChip(
+                                    selected = currentToolMode == ToolMode.ERASER,
+                                    onClick = { currentToolMode = ToolMode.ERASER },
+                                    label = {
+                                        Icon(
+                                            Icons.Default.FormatPaint,
+                                            contentDescription = "Eraser Tool",
+                                        )
+                                    },
+                                )
                             }
 
                             Box(
@@ -777,7 +766,7 @@ fun InpaintScreen(
                 visible = isLoading,
                 scrimAlpha = 0.6f,
             ) {
-                ContainedLoadingIndicator()
+                CircularProgressIndicator()
             }
 
             if (errorMessage != null) {

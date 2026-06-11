@@ -62,7 +62,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -602,7 +602,7 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             } else {
-                ContainedLoadingIndicator()
+                CircularProgressIndicator()
                 if (currentLog.isNotEmpty()) {
                     Text(
                         text = currentLog,

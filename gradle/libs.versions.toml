@@ -7,11 +7,9 @@ junitVersion = "1.2.1"
 espressoCore = "3.6.1"
 lifecycleRuntimeKtx = "2.9.1"
 activityCompose = "1.10.1"
-composeBom = "2025.10.01"
-material3 = "1.5.0-alpha20"
+composeBom = "2024.12.01"
 material3-adaptive = "1.1.0"
 graphics-shapes = "1.0.1"
-navigation-compose = "2.10.0-alpha02"
 okhttp = "4.12.0"
 material-icons = "1.7.8"
 datastore = "1.1.7"
@@ -38,11 +36,11 @@ androidx-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 androidx-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 androidx-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
-androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
+androidx-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-material3-adaptive = { group = "androidx.compose.material3.adaptive", name = "adaptive", version.ref = "material3-adaptive" }
 androidx-material3-window-size = { group = "androidx.compose.material3", name = "material3-window-size-class" }
 androidx-graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version.ref = "graphics-shapes" }
-androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigation-compose" }
+androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 androidx-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core", version.ref = "material-icons" }
 androidx-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended", version.ref = "material-icons" }

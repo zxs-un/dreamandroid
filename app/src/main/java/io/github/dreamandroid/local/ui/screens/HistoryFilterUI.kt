@@ -23,14 +23,12 @@ import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DateRangePicker
 import androidx.compose.material3.DateRangePickerDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -44,7 +42,6 @@ import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.runtime.Composable
@@ -70,7 +67,6 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun HistoryFilterBar(
     filter: HistoryFilter,
@@ -91,24 +87,18 @@ fun HistoryFilterBar(
             val isCurrentOnly = filter.modelIds == setOf(currentModelId)
             val isAllModels = filter.modelIds == null
             Row(
-                horizontalArrangement = Arrangement.spacedBy(
-                    ButtonGroupDefaults.ConnectedSpaceBetween,
-                ),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
             ) {
-                ToggleButton(
-                    checked = isCurrentOnly,
-                    onCheckedChange = { checked -> if (checked) onSetCurrentModelOnly() },
-                    shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                ) {
-                    Text(stringResource(R.string.history_filter_current_model_only))
-                }
-                ToggleButton(
-                    checked = isAllModels,
-                    onCheckedChange = { checked -> if (checked) onSetAllModels() },
-                    shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                ) {
-                    Text(stringResource(R.string.history_filter_all_models))
-                }
+                FilterChip(
+                    selected = isCurrentOnly,
+                    onClick = { onSetCurrentModelOnly() },
+                    label = { Text(stringResource(R.string.history_filter_current_model_only)) },
+                )
+                FilterChip(
+                    selected = isAllModels,
+                    onClick = { onSetAllModels() },
+                    label = { Text(stringResource(R.string.history_filter_all_models)) },
+                )
             }
             val advanced = filter.hasAdvancedFilters()
             AssistChip(
@@ -155,7 +145,7 @@ private fun HistoryFilter.hasAdvancedFilters(): Boolean = modes != null ||
     !promptSubstring.isNullOrBlank() ||
     !descending
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistoryFilterSheet(
     initialFilter: HistoryFilter,
@@ -314,28 +304,18 @@ fun HistoryFilterSheet(
 
             Section(stringResource(R.string.history_filter_sort)) {
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(
-                        ButtonGroupDefaults.ConnectedSpaceBetween,
-                    ),
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                 ) {
-                    ToggleButton(
-                        checked = draft.descending,
-                        onCheckedChange = { checked ->
-                            if (checked) draft = draft.copy(descending = true)
-                        },
-                        shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                    ) {
-                        Text(stringResource(R.string.history_filter_sort_desc))
-                    }
-                    ToggleButton(
-                        checked = !draft.descending,
-                        onCheckedChange = { checked ->
-                            if (checked) draft = draft.copy(descending = false)
-                        },
-                        shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                    ) {
-                        Text(stringResource(R.string.history_filter_sort_asc))
-                    }
+                    FilterChip(
+                        selected = draft.descending,
+                        onClick = { draft = draft.copy(descending = true) },
+                        label = { Text(stringResource(R.string.history_filter_sort_desc)) },
+                    )
+                    FilterChip(
+                        selected = !draft.descending,
+                        onClick = { draft = draft.copy(descending = false) },
+                        label = { Text(stringResource(R.string.history_filter_sort_asc)) },
+                    )
                 }
             }
 
@@ -614,7 +594,7 @@ private fun ChipRow(content: @Composable () -> Unit) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ToneFilterChip(selected: Boolean, onClick: () -> Unit, label: @Composable () -> Unit) {
     FilterChip(
@@ -649,7 +629,6 @@ private fun ToneFilterChip(selected: Boolean, onClick: () -> Unit, label: @Compo
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ToneAssistChip(onClick: () -> Unit, active: Boolean = false, label: @Composable () -> Unit) {
     AssistChip(

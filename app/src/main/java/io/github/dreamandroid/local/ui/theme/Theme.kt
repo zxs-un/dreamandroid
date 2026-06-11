@@ -2,9 +2,7 @@ package io.github.dreamandroid.local.ui.theme
 
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.MaterialExpressiveTheme
-import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
@@ -54,7 +52,6 @@ private inline val ThemeState.systemFollowsDark: Boolean
         DarkModePreference.DARK -> true
     }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DreamAndroidTheme(themeState: ThemeState, content: @Composable () -> Unit) {
     val darkTheme = themeState.systemFollowsDark
@@ -67,11 +64,10 @@ fun DreamAndroidTheme(themeState: ThemeState, content: @Composable () -> Unit) {
         else -> themeState.preset.scheme(darkTheme)
     }
 
-    MaterialExpressiveTheme(
+    MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
         shapes = Shapes,
-        motionScheme = MotionScheme.expressive(),
         content = content,
     )
 }

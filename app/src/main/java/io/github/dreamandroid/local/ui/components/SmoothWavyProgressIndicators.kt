@@ -1,15 +1,13 @@
 package io.github.dreamandroid.local.ui.components
 
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.material3.CircularWavyProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.LinearWavyProgressIndicator
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import io.github.dreamandroid.local.ui.theme.Motion
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SmoothLinearWavyProgressIndicator(progress: Float, modifier: Modifier = Modifier) {
     val animated by animateFloatAsState(
@@ -17,13 +15,12 @@ fun SmoothLinearWavyProgressIndicator(progress: Float, modifier: Modifier = Modi
         animationSpec = Motion.Progress,
         label = "linearProgress",
     )
-    LinearWavyProgressIndicator(
+    LinearProgressIndicator(
         progress = { animated },
         modifier = modifier,
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SmoothCircularWavyProgressIndicator(progress: Float, modifier: Modifier = Modifier) {
     val animated by animateFloatAsState(
@@ -31,7 +28,7 @@ fun SmoothCircularWavyProgressIndicator(progress: Float, modifier: Modifier = Mo
         animationSpec = Motion.Progress,
         label = "circularProgress",
     )
-    CircularWavyProgressIndicator(
+    CircularProgressIndicator(
         progress = { animated },
         modifier = modifier,
     )

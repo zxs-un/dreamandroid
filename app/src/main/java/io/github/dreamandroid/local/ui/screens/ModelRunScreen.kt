@@ -97,17 +97,14 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -123,7 +120,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
@@ -409,7 +405,7 @@ data class GenerationParameters(
 )
 
 @SuppressLint("DefaultLocale")
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modifier = Modifier) {
     val serviceState by BackgroundGenerationService.generationState.collectAsState()
@@ -2162,49 +2158,40 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                         modifier = Modifier
                                                             .fillMaxWidth()
                                                             .horizontalScroll(rememberScrollState()),
-                                                        horizontalArrangement = Arrangement.spacedBy(
-                                                            ButtonGroupDefaults.ConnectedSpaceBetween,
-                                                        ),
+                                                        horizontalArrangement = Arrangement.spacedBy(0.dp),
                                                     ) {
                                                         presets.forEachIndexed { index, ratio ->
-                                                            val shapes = if (index == 0) {
-                                                                ButtonGroupDefaults.connectedLeadingButtonShapes()
-                                                            } else {
-                                                                ButtonGroupDefaults.connectedMiddleButtonShapes()
-                                                            }
-                                                            ToggleButton(
-                                                                checked = aspectRatio == ratio,
-                                                                onCheckedChange = { checked ->
-                                                                    if (checked && !isRunning && aspectRatio != ratio) {
+                                                            FilterChip(
+                                                                selected = aspectRatio == ratio,
+                                                                onClick = {
+                                                                    if (!isRunning && aspectRatio != ratio) {
                                                                         aspectRatio = ratio
                                                                         clearImg2imgState()
                                                                         saveAllFields()
                                                                     }
                                                                 },
-                                                                shapes = shapes,
+                                                                label = { Text(ratio) },
                                                                 enabled = !isRunning,
-                                                            ) {
-                                                                Text(ratio)
-                                                            }
+                                                            )
                                                         }
-                                                        ToggleButton(
-                                                            checked = isCustom,
-                                                            onCheckedChange = {
+                                                        FilterChip(
+                                                            selected = isCustom,
+                                                            onClick = {
                                                                 if (!isRunning) {
                                                                     showCustomAspectRatioDialog = true
                                                                 }
                                                             },
-                                                            shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                                                            label = {
+                                                                Text(
+                                                                    if (isCustom) {
+                                                                        aspectRatio
+                                                                    } else {
+                                                                        stringResource(R.string.aspect_ratio_custom)
+                                                                    },
+                                                                )
+                                                            },
                                                             enabled = !isRunning,
-                                                        ) {
-                                                            Text(
-                                                                if (isCustom) {
-                                                                    aspectRatio
-                                                                } else {
-                                                                    stringResource(R.string.aspect_ratio_custom)
-                                                                },
-                                                            )
-                                                        }
+                                                        )
                                                     }
                                                 }
                                             }
@@ -2228,24 +2215,14 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                             .horizontalScroll(
                                                                 rememberScrollState(),
                                                             ),
-                                                        horizontalArrangement = Arrangement.spacedBy(
-                                                            ButtonGroupDefaults.ConnectedSpaceBetween,
-                                                        ),
+                                                        horizontalArrangement = Arrangement.spacedBy(0.dp),
                                                     ) {
                                                         availableResolutions.forEachIndexed { index, resolution ->
-                                                            val shapes = when (index) {
-                                                                0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-
-                                                                availableResolutions.lastIndex ->
-                                                                    ButtonGroupDefaults.connectedTrailingButtonShapes()
-
-                                                                else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                                                            }
-                                                            ToggleButton(
-                                                                checked = currentWidth == resolution.width &&
+                                                            FilterChip(
+                                                                selected = currentWidth == resolution.width &&
                                                                     currentHeight == resolution.height,
-                                                                onCheckedChange = { checked ->
-                                                                    if (checked &&
+                                                                onClick = {
+                                                                    if (
                                                                         !isRunning &&
                                                                         (
                                                                             resolution.width != currentWidth ||
@@ -2256,11 +2233,9 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                                         showResolutionChangeDialog = true
                                                                     }
                                                                 },
-                                                                shapes = shapes,
+                                                                label = { Text(resolution.toString()) },
                                                                 enabled = !isRunning,
-                                                            ) {
-                                                                Text(resolution.toString())
-                                                            }
+                                                            )
                                                         }
                                                     }
                                                 }
@@ -2321,23 +2296,13 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                     modifier = Modifier
                                                         .fillMaxWidth()
                                                         .horizontalScroll(rememberScrollState()),
-                                                    horizontalArrangement = Arrangement.spacedBy(
-                                                        ButtonGroupDefaults.ConnectedSpaceBetween,
-                                                    ),
+                                                    horizontalArrangement = Arrangement.spacedBy(0.dp),
                                                 ) {
                                                     baseOptions.forEachIndexed { index, (id, label) ->
-                                                        val shapes = when (index) {
-                                                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-
-                                                            baseOptions.lastIndex ->
-                                                                ButtonGroupDefaults.connectedTrailingButtonShapes()
-
-                                                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                                                        }
-                                                        ToggleButton(
-                                                            checked = baseId == id,
-                                                            onCheckedChange = { checked ->
-                                                                if (checked) {
+                                                        FilterChip(
+                                                            selected = baseId == id,
+                                                            onClick = {
+                                                                if (baseId != id) {
                                                                     val nextKarras =
                                                                         karras && id != "lcm"
                                                                     scheduler = if (nextKarras) {
@@ -2348,10 +2313,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                                     saveAllFields()
                                                                 }
                                                             },
-                                                            shapes = shapes,
-                                                        ) {
-                                                            Text(label)
-                                                        }
+                                                            label = { Text(label) },
+                                                        )
                                                     }
                                                 }
                                             }
@@ -2409,39 +2372,32 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                                 Row(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(
-                                                        ButtonGroupDefaults.ConnectedSpaceBetween,
-                                                    ),
                                                 ) {
                                                     Text(
                                                         "Runtime",
                                                         style = MaterialTheme.typography.bodyMedium,
                                                         modifier = Modifier.padding(end = 4.dp),
                                                     )
-                                                    ToggleButton(
-                                                        checked = !useOpenCL,
-                                                        onCheckedChange = { checked ->
-                                                            if (checked) {
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                                                        FilterChip(
+                                                            selected = !useOpenCL,
+                                                            onClick = {
                                                                 useOpenCL = false
                                                                 saveAllFields()
-                                                            }
-                                                        },
-                                                        shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                                                        modifier = Modifier.weight(1f),
-                                                    ) {
-                                                        Text("CPU")
-                                                    }
-                                                    ToggleButton(
-                                                        checked = useOpenCL,
-                                                        onCheckedChange = { checked ->
-                                                            if (checked) {
-                                                                showOpenCLWarningDialog = true
-                                                            }
-                                                        },
-                                                        shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                                                        modifier = Modifier.weight(1f),
-                                                    ) {
-                                                        Text("GPU")
+                                                            },
+                                                            label = { Text("CPU") },
+                                                            modifier = Modifier.weight(1f),
+                                                        )
+                                                        FilterChip(
+                                                            selected = useOpenCL,
+                                                            onClick = {
+                                                                if (!useOpenCL) {
+                                                                    showOpenCLWarningDialog = true
+                                                                }
+                                                            },
+                                                            label = { Text("GPU") },
+                                                            modifier = Modifier.weight(1f),
+                                                        )
                                                     }
                                                 }
                                             }
@@ -3709,12 +3665,18 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                     val visibleItems = historyItems
                     val isAllSelected =
                         selectedItems.size == visibleItems.size && visibleItems.all { it in selectedItems }
-                    HorizontalFloatingToolbar(
-                        expanded = true,
+                    Surface(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(16.dp),
-                        leadingContent = {
+                        shape = MaterialTheme.shapes.extraLarge,
+                        shadowElevation = 6.dp,
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
                             IconButton(
                                 onClick = {
                                     isSelectionMode = false
@@ -3727,8 +3689,15 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     contentDescription = "Exit selection mode",
                                 )
                             }
-                        },
-                        trailingContent = {
+                            Text(
+                                text = pluralStringResource(
+                                    R.plurals.selected_items_count,
+                                    selectedItems.size,
+                                    selectedItems.size,
+                                ),
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.weight(1f),
+                            )
                             CompositionLocalProvider(
                                 LocalMinimumInteractiveComponentSize provides Dp.Unspecified,
                             ) {
@@ -3781,16 +3750,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     )
                                 }
                             }
-                        },
-                    ) {
-                        Text(
-                            text = pluralStringResource(
-                                R.plurals.selected_items_count,
-                                selectedItems.size,
-                                selectedItems.size,
-                            ),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
+                        }
                     }
                 }
             }
@@ -4115,7 +4075,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     BlockingProgressOverlay(visible = isCheckingBackend) {
-        ContainedLoadingIndicator()
+        CircularProgressIndicator()
         Text(
             text = stringResource(R.string.loading_model),
             style = MaterialTheme.typography.bodyLarge,
@@ -4124,7 +4084,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     BlockingProgressOverlay(visible = isUpscaling) {
-        ContainedLoadingIndicator()
+        CircularProgressIndicator()
         Text(
             text = stringResource(R.string.upscaling_image),
             style = MaterialTheme.typography.bodyLarge,
@@ -4739,7 +4699,6 @@ fun UpscalerSelectDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun UpscalerModelCard(
     upscaler: UpscalerModel,

@@ -31,6 +31,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -41,13 +42,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
-import androidx.compose.material3.AppBarRow
-import androidx.compose.material3.ButtonGroupDefaults
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MaterialShapes
-import androidx.compose.material3.ToggleButton
-import androidx.compose.material3.toShape
 import androidx.compose.runtime.*
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
@@ -146,7 +142,6 @@ private fun DeleteConfirmDialog(selectedCount: Int, onConfirm: () -> Unit, onDis
 
 @OptIn(
     ExperimentalMaterial3Api::class,
-    ExperimentalMaterial3ExpressiveApi::class,
     ExperimentalFoundationApi::class,
 )
 @Composable
@@ -728,30 +723,18 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                         val helpLabel = stringResource(R.string.help)
                         val upscaleLabel = stringResource(R.string.image_upscale)
                         val settingsLabel = stringResource(R.string.settings)
-                        AppBarRow {
-                            clickableItem(
-                                onClick = { showHelpDialog = true },
-                                icon = {
-                                    Icon(Icons.AutoMirrored.Filled.Help, contentDescription = null)
-                                },
-                                label = helpLabel,
-                            )
-                            if (Model.isQualcommDevice()) {
-                                clickableItem(
-                                    onClick = { navController.navigate(Screen.Upscale.route) },
-                                    icon = {
-                                        Icon(Icons.Default.AutoFixHigh, contentDescription = null)
-                                    },
-                                    label = upscaleLabel,
-                                )
+                        {
+                            IconButton(onClick = { showHelpDialog = true }) {
+                                Icon(Icons.AutoMirrored.Filled.Help, helpLabel)
                             }
-                            clickableItem(
-                                onClick = { showSettingsDialog = true },
-                                icon = {
-                                    Icon(Icons.Default.Settings, contentDescription = null)
-                                },
-                                label = settingsLabel,
-                            )
+                            if (Model.isQualcommDevice()) {
+                                IconButton(onClick = { navController.navigate(Screen.Upscale.route) }) {
+                                    Icon(Icons.Default.AutoFixHigh, upscaleLabel)
+                                }
+                            }
+                            IconButton(onClick = { showSettingsDialog = true }) {
+                                Icon(Icons.Default.Settings, settingsLabel)
+                            }
                         }
                     }
                 },
@@ -1527,7 +1510,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 color = MaterialTheme.colorScheme.onSurface,
             )
         } else {
-            ContainedLoadingIndicator()
+            CircularProgressIndicator()
             Text(
                 text = if (conversionProgress.isNotEmpty()) {
                     conversionProgress
@@ -1578,7 +1561,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            ContainedLoadingIndicator()
+            CircularProgressIndicator()
             Text(
                 text = stringResource(R.string.extracting),
                 style = MaterialTheme.typography.bodyLarge,
@@ -1868,7 +1851,6 @@ private fun formatFileSize(size: Long): String {
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDeleted: () -> Unit) {
     var modelFolders by remember { mutableStateOf<List<Pair<String, Int>>>(emptyList()) }
@@ -2017,7 +1999,7 @@ private fun FileManagerDialog(context: Context, onDismiss: () -> Unit, onFileDel
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ContainedLoadingIndicator()
+                        CircularProgressIndicator()
                         Text(
                             stringResource(R.string.loading_files),
                             modifier = Modifier.padding(top = 48.dp),
@@ -2365,7 +2347,6 @@ fun CustomNpuModelDialog(context: Context, onDismiss: () -> Unit, onModelAdded: 
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun CustomModelDialog(
     context: Context,
@@ -2434,26 +2415,20 @@ fun CustomModelDialog(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(
-                            ButtonGroupDefaults.ConnectedSpaceBetween,
-                        ),
+                        horizontalArrangement = Arrangement.spacedBy(0.dp),
                     ) {
-                        ToggleButton(
-                            checked = clipSkip == 1,
-                            onCheckedChange = { checked -> if (checked) clipSkip = 1 },
-                            shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
+                        FilterChip(
+                            selected = clipSkip == 1,
+                            onClick = { clipSkip = 1 },
+                            label = { Text("Clip Skip 1") },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Clip Skip 1")
-                        }
-                        ToggleButton(
-                            checked = clipSkip == 2,
-                            onCheckedChange = { checked -> if (checked) clipSkip = 2 },
-                            shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
+                        )
+                        FilterChip(
+                            selected = clipSkip == 2,
+                            onClick = { clipSkip = 2 },
+                            label = { Text("Clip Skip 2") },
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text("Clip Skip 2")
-                        }
+                        )
                     }
                     Text(
                         text = stringResource(R.string.clip_skip_hint),
@@ -2767,7 +2742,6 @@ suspend fun extractNpuModel(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun EmbeddingManagerDialog(
     context: Context,
@@ -2876,7 +2850,7 @@ fun EmbeddingManagerDialog(
                         modifier = Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center,
                     ) {
-                        ContainedLoadingIndicator()
+                        CircularProgressIndicator()
                     }
                 } else if (embeddingFiles.isEmpty()) {
                     Box(
@@ -3343,7 +3317,7 @@ private fun SwitchSettingRow(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppearanceSection() {
     val themeController = LocalThemeController.current
@@ -3438,35 +3412,26 @@ private fun AppearanceSection() {
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(
-                        ButtonGroupDefaults.ConnectedSpaceBetween,
-                    ),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     val modes = DarkModePreference.entries
-                    modes.forEachIndexed { index, mode ->
-                        val shapes = when (index) {
-                            0 -> ButtonGroupDefaults.connectedLeadingButtonShapes()
-                            modes.lastIndex -> ButtonGroupDefaults.connectedTrailingButtonShapes()
-                            else -> ButtonGroupDefaults.connectedMiddleButtonShapes()
-                        }
-                        ToggleButton(
-                            checked = mode == state.darkMode,
-                            onCheckedChange = { checked ->
-                                if (checked) themeController.update { it.copy(darkMode = mode) }
+                    modes.forEach { mode ->
+                        FilterChip(
+                            selected = mode == state.darkMode,
+                            onClick = { themeController.update { it.copy(darkMode = mode) } },
+                            label = {
+                                Text(
+                                    text = stringResource(
+                                        when (mode) {
+                                            DarkModePreference.SYSTEM -> R.string.dark_mode_system
+                                            DarkModePreference.LIGHT -> R.string.dark_mode_light
+                                            DarkModePreference.DARK -> R.string.dark_mode_dark
+                                        },
+                                    ),
+                                )
                             },
-                            shapes = shapes,
                             modifier = Modifier.weight(1f),
-                        ) {
-                            Text(
-                                text = stringResource(
-                                    when (mode) {
-                                        DarkModePreference.SYSTEM -> R.string.dark_mode_system
-                                        DarkModePreference.LIGHT -> R.string.dark_mode_light
-                                        DarkModePreference.DARK -> R.string.dark_mode_dark
-                                    },
-                                ),
-                            )
-                        }
+                        )
                     }
                 }
             }
@@ -3474,7 +3439,7 @@ private fun AppearanceSection() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ThemeSwatch(
     preset: ThemePreset,
@@ -3487,13 +3452,12 @@ private fun ThemeSwatch(
     val scheme = preset.scheme(isDark)
     val alpha = if (enabled) 1f else 0.45f
     val description = stringResource(preset.nameRes)
-    val polygon = when (preset) {
-        ThemePreset.TANGERINE -> MaterialShapes.Cookie9Sided
-        ThemePreset.FOREST -> MaterialShapes.Clover4Leaf
-        ThemePreset.OCEAN -> MaterialShapes.Sunny
-        ThemePreset.AMBER -> MaterialShapes.Cookie6Sided
+    val shape = when (preset) {
+        ThemePreset.TANGERINE -> RoundedCornerShape(16.dp)
+        ThemePreset.FOREST -> CircleShape
+        ThemePreset.OCEAN -> RoundedCornerShape(8.dp)
+        ThemePreset.AMBER -> RoundedCornerShape(4.dp)
     }
-    val shape = polygon.toShape()
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Surface(
             onClick = onClick,
