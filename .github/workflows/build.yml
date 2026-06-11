@@ -120,8 +120,8 @@ jobs:
       - name: Install Android SDK
         run: |
           $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+            "platforms;android-37" \
+            "build-tools;37.0.0"
 
       # -------- download native outputs (if built) --------
       - name: Download native artifacts

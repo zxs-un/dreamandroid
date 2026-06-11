@@ -27,13 +27,13 @@ detekt {
 
 android {
     namespace = "io.github.dreamandroid.local"
-    compileSdk = 35
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.dreamandroid.local"
         minSdk = 28
 //        minSdk = 31
-        targetSdk = 35
+        targetSdk = 37
         versionCode = 70
         versionName = "2.6.3"
 
