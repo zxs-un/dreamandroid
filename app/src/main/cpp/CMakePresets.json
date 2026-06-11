@@ -19,10 +19,7 @@
         "CMAKE_CXX_COMPILER_LAUNCHER": "ccache",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       },
-      "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake",
-      "environment": {
-        "ANDROID_NDK_ROOT": "/data/android-ndk-r28"
-      }
+      "toolchainFile": "$env{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake"
     },
     {
       "name": "android-debug",
