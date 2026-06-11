@@ -33,7 +33,7 @@ android {
         applicationId = "io.github.dreamandroid.local"
         minSdk = 28
 //        minSdk = 31
-        targetSdk = 36
+        targetSdk = 35
         versionCode = 70
         versionName = "2.6.3"
 
