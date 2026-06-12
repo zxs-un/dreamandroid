@@ -19,12 +19,13 @@ file(COPY ${QNN_SDK_ROOT}/examples/QNN/SampleApp/SampleApp/
 # Comment out all "private:" lines so QnnModel subclass can access members.
 # This replaces the fragile per-version patch approach — works regardless of
 # where the SDK puts its private: markers.
+# NOTE: regex must account for leading whitespace (indentation) before "private:".
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/QnnSampleApp.hpp" QNN_APP_HPP)
-string(REGEX REPLACE "\nprivate:" "\n//  private:" QNN_APP_HPP "${QNN_APP_HPP}")
+string(REGEX REPLACE "\n[ \t]*private:" "\n//  private:" QNN_APP_HPP "${QNN_APP_HPP}")
 file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/QnnSampleApp.hpp" "${QNN_APP_HPP}")
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/Utils/IOTensor.hpp" IOTENSOR_HPP)
-string(REGEX REPLACE "\nprivate:" "\n//  private:" IOTENSOR_HPP "${IOTENSOR_HPP}")
+string(REGEX REPLACE "\n[ \t]*private:" "\n//  private:" IOTENSOR_HPP "${IOTENSOR_HPP}")
 file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/SampleApp/src/Utils/IOTensor.hpp" "${IOTENSOR_HPP}")
 
 # Apply remaining functional patches (.cpp internals) via git apply
