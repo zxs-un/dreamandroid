@@ -25,6 +25,4 @@
 [submodule "app/src/main/cpp/3rdparty/xtensor-blas"]
 	path = app/src/main/cpp/3rdparty/xtensor-blas
 	url = ../../xtensor-stack/xtensor-blas.git
-[submodule "app/src/main/cpp/3rdparty/tokenizers-cpp"]
-	path = app/src/main/cpp/3rdparty/tokenizers-cpp
-	url = ../../xororz/tokenizers-cpp.git
+
