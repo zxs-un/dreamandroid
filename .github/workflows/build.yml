@@ -85,6 +85,24 @@ jobs:
             sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build
           fi
 
+          # --- Rust (for tokenizers-cpp) ---
+          if which rustup > /dev/null 2>&1; then
+            if rustup target list --installed | grep -q aarch64-linux-android; then
+              echo "✅ Rust target aarch64-linux-android already installed"
+            else
+              echo "🔧 Installing Rust target aarch64-linux-android..."
+              rustup target add aarch64-linux-android
+            fi
+            if which cargo-ndk > /dev/null 2>&1; then
+              echo "✅ cargo-ndk found"
+            else
+              echo "🔧 Installing cargo-ndk..."
+              cargo install cargo-ndk
+            fi
+          else
+            echo "⚠️  rustup not found — tokenizers-cpp build may fail"
+          fi
+
           # --- ccache ---
           sudo apt-get install -y -qq ccache
 
@@ -96,8 +114,10 @@ jobs:
 
       # -------- cmake configure & build --------
       - name: CMake configure & build
+        id: cmake-build
         working-directory: app/src/main/cpp
         run: |
+          set -euo pipefail
           QNN_SDK_ROOT="${{ github.workspace }}/qairt_sdk"
 
           echo "NDK  : $ANDROID_NDK_ROOT"
@@ -105,8 +125,19 @@ jobs:
 
           cmake --preset android-release \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-            -DQNN_SDK_ROOT="$QNN_SDK_ROOT"
-          cmake --build --preset android-release
+            -DQNN_SDK_ROOT="$QNN_SDK_ROOT" \
+            2>&1 | tee ../native-build-log.txt
+          cmake --build --preset android-release \
+            2>&1 | tee -a ../native-build-log.txt
+
+      # -------- upload native build log (always, independent step) --------
+      - name: Upload native build log
+        if: always() && steps.cmake-build.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-build-log
+          path: app/src/main/native-build-log.txt
+          retention-days: 7
 
       # -------- prepare native outputs for APK --------
       - name: Prepare native outputs
@@ -210,18 +241,11 @@ jobs:
 
       - name: Gradle assemble
         id: gradle-build
-        run: ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --info 2>&1 | tee build-log.txt
+        run: |
+          set -euo pipefail
+          ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --info 2>&1 | tee build-log.txt
 
-      # -------- upload build log (always, even on failure) --------
-      - name: Upload build log
-        if: always() && steps.gradle-build.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build-log.txt
-          retention-days: 7
-
-      # -------- upload APK (only on success) --------
+      # -------- upload APK (only on success, independent step) --------
       - name: Upload APK
         if: steps.gradle-build.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -229,3 +253,12 @@ jobs:
           name: dreamandroid-APK
           path: app/build/outputs/apk/basic/release/*.apk
           retention-days: 30
+
+      # -------- upload build log (always, independent step) --------
+      - name: Upload build log
+        if: always() && steps.gradle-build.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build-log.txt
+          retention-days: 7
