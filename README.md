@@ -1,4 +1,4 @@
-# dreamandroid
+# DreamHub
 
 **Android Stable Diffusion with Snapdragon NPU acceleration — SDK Migration Fork**
 
@@ -13,17 +13,16 @@
 
 ## Version
 
-The app version lives in the **[VERSION](VERSION)** file at the repository root:
+The app version lives in **[VERSION_NAME](VERSION_NAME)** and **[VERSION_CODE](VERSION_CODE)** at the repository root:
 
 ```
-2026.06.12.06.00
+VERSION_NAME     → 2026.06.12.06.00    # versionName: YYYY.MM.DD.HH.mm (UTC)
+VERSION_CODE     → 235                 # versionCode: commit count
 ```
 
-Format: `YYYY.MM.DD.HH.mm` — year, month, day, hour, minute (UTC, zero-padded).
-
-`build.gradle.kts` reads this file and derives both `versionName` (used as-is) and
-`versionCode` (Unix timestamp, required by Android).  CI enforces the format at
-the start of each build and fails immediately if VERSION does not match the
+`build.gradle.kts` reads these files to set `versionName` (used as-is) and
+`versionCode`.  CI enforces the format at
+the start of each build and fails immediately if VERSION_NAME does not match the
 pattern.
 
 ---

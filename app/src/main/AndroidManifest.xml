@@ -31,7 +31,7 @@
         android:requestLegacyExternalStorage="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.DreamAndroid"
+        android:theme="@style/Theme.DreamHub"
         tools:targetApi="33">
 
         <activity
@@ -39,7 +39,7 @@
             android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode"
             android:exported="true"
             android:screenOrientation="portrait"
-            android:theme="@style/Theme.DreamAndroid"
+            android:theme="@style/Theme.DreamHub"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -53,7 +53,7 @@ private inline val ThemeState.systemFollowsDark: Boolean
     }
 
 @Composable
-fun DreamAndroidTheme(themeState: ThemeState, content: @Composable () -> Unit) {
+fun DreamHubTheme(themeState: ThemeState, content: @Composable () -> Unit) {
     val darkTheme = themeState.systemFollowsDark
     val colorScheme = when {
         themeState.dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

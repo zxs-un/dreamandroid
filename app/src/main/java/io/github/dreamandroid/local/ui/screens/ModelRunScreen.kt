@@ -4334,6 +4334,8 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     saveImageFromFile(
                                         context = context,
                                         sourceFile = item.imageFile,
+                                        width = item.params.width,
+                                        height = item.params.height,
                                         onSuccess = { success = true },
                                         onError = { },
                                     )

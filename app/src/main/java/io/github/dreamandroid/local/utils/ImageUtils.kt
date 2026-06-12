@@ -203,16 +203,20 @@ suspend fun reportImage(
 }
 
 suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, onError: (String) -> Unit) {
+    saveImage(context, bitmap, bitmap.width, bitmap.height, onSuccess, onError)
+}
+
+suspend fun saveImage(context: Context, bitmap: Bitmap, width: Int, height: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
     withContext(Dispatchers.IO) {
         try {
             val startTime = System.currentTimeMillis()
             Log.d(
                 "SaveImage",
-                "Start saving image - size: ${bitmap.width}x${bitmap.height}",
+                "Start saving image - size: ${width}x${height}",
             )
 
             // Save as JPEG if width or height is greater than 1024, otherwise save as PNG
-            val isLargeImage = bitmap.width > 1024 || bitmap.height > 1024
+            val isLargeImage = width > 1024 || height > 1024
             val format = if (isLargeImage) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG
             val extension = if (isLargeImage) "jpg" else "png"
             val mimeType = if (isLargeImage) "image/jpeg" else "image/png"
@@ -222,6 +226,10 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, o
 
             val filename = nextSaveFilename(extension)
 
+            // Subdirectory based on image size, e.g. DreamHub/512x512
+            val sizeDir = "${width}x${height}"
+            val relativePath = Environment.DIRECTORY_PICTURES + "/DreamHub/" + sizeDir
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 // Android 10 MediaStore API
                 val contentValues = ContentValues().apply {
@@ -229,7 +237,7 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, o
                     put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                     put(
                         MediaStore.Images.Media.RELATIVE_PATH,
-                        Environment.DIRECTORY_PICTURES + "/dreamandroid",
+                        relativePath,
                     )
                 }
 
@@ -257,7 +265,7 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, o
                     Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_PICTURES,
                     ),
-                    "dreamandroid",
+                    "DreamHub/$sizeDir",
                 )
 
                 if (!imagesDir.exists()) {
@@ -297,11 +305,15 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, onSuccess: () -> Unit, o
 }
 
 /**
- * Copies a pre-encoded image file (PNG/JPEG) into the Pictures/dreamandroid gallery
+ * Copies a pre-encoded image file (PNG/JPEG) into the Pictures/DreamHub gallery
  * folder without decoding + re-encoding. Used for batch-saving history items
  * where the source file is already in the format we want to export.
  */
 suspend fun saveImageFromFile(context: Context, sourceFile: File, onSuccess: () -> Unit, onError: (String) -> Unit) {
+    saveImageFromFile(context, sourceFile, 0, 0, onSuccess, onError)
+}
+
+suspend fun saveImageFromFile(context: Context, sourceFile: File, width: Int, height: Int, onSuccess: () -> Unit, onError: (String) -> Unit) {
     withContext(Dispatchers.IO) {
         try {
             val extension = sourceFile.extension.lowercase().ifEmpty { "png" }
@@ -313,13 +325,17 @@ suspend fun saveImageFromFile(context: Context, sourceFile: File, onSuccess: () 
             }
             val filename = nextSaveFilename(extension)
 
+            // Subdirectory based on image size, e.g. DreamHub/512x512
+            val sizeDir = if (width > 0 && height > 0) "${width}x${height}" else "unknown"
+            val relativePath = Environment.DIRECTORY_PICTURES + "/DreamHub/" + sizeDir
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Images.Media.DISPLAY_NAME, filename)
                     put(MediaStore.Images.Media.MIME_TYPE, mimeType)
                     put(
                         MediaStore.Images.Media.RELATIVE_PATH,
-                        Environment.DIRECTORY_PICTURES + "/dreamandroid",
+                        relativePath,
                     )
                 }
                 val resolver = context.contentResolver
@@ -336,7 +352,7 @@ suspend fun saveImageFromFile(context: Context, sourceFile: File, onSuccess: () 
                     Environment.getExternalStoragePublicDirectory(
                         Environment.DIRECTORY_PICTURES,
                     ),
-                    "dreamandroid",
+                    "DreamHub/$sizeDir",
                 )
                 if (!imagesDir.exists()) imagesDir.mkdirs()
                 val outFile = File(imagesDir, filename)

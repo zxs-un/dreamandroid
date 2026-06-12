@@ -172,16 +172,16 @@ jobs:
       - name: Checkout dreamandroid
         uses: actions/checkout@v4
 
-      # -------- validate VERSION format --------
-      - name: Validate VERSION
+      # -------- validate VERSION_NAME format --------
+      - name: Validate VERSION_NAME
         run: |
-          VERSION=$(cat VERSION)
+          VERSION=$(cat VERSION_NAME)
           if ! echo "$VERSION" | grep -qP '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$'; then
-            echo "❌ VERSION format invalid: '$VERSION'"
+            echo "❌ VERSION_NAME format invalid: '$VERSION'"
             echo "   Expected format: YYYY.MM.DD.HH.mm (e.g. 2026.06.12.06.00)"
             exit 1
           fi
-          echo "✅ VERSION: $VERSION"
+          echo "✅ VERSION_NAME: $VERSION"
 
       # -------- JDK & Android SDK (check version, install only if missing) --------
       - name: Verify JDK
@@ -298,10 +298,22 @@ jobs:
         with:
           name: dreamandroid-APK
 
+      - name: Rename APK for release
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          for f in dreamandroid_armv8a_*.apk; do
+            if [ -f "$f" ]; then
+              NEW="DreamHub-${VERSION}-arm64-v8a-release.apk"
+              mv "$f" "$NEW"
+              echo "Renamed $f → $NEW"
+            fi
+          done
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dreamandroid_armv8a_*.apk
+          files: DreamHub-*-arm64-v8a-release.apk
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: true

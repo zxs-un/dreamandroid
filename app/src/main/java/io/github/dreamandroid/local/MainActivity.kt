@@ -29,7 +29,7 @@ import io.github.dreamandroid.local.ui.screens.MigrationScreen
 import io.github.dreamandroid.local.ui.screens.ModelListScreen
 import io.github.dreamandroid.local.ui.screens.ModelRunScreen
 import io.github.dreamandroid.local.ui.screens.UpscaleScreen
-import io.github.dreamandroid.local.ui.theme.DreamAndroidTheme
+import io.github.dreamandroid.local.ui.theme.DreamHubTheme
 import io.github.dreamandroid.local.ui.theme.LocalThemeController
 import io.github.dreamandroid.local.ui.theme.rememberThemeController
 import io.github.dreamandroid.local.ui.theme.sharedAxisXEnter
@@ -128,7 +128,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val themeController = rememberThemeController()
             CompositionLocalProvider(LocalThemeController provides themeController) {
-                DreamAndroidTheme(themeController.state) {
+                DreamHubTheme(themeController.state) {
                     Surface(
                         modifier = Modifier.fillMaxSize(),
                         color = MaterialTheme.colorScheme.surface,

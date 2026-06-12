@@ -25,16 +25,16 @@ detekt {
     source.setFrom(files("src/main/java", "src/main/kotlin"))
 }
 
-// Read app version from VERSION file at project root.
+// Read app version from VERSION_NAME file at project root.
 // Format: YYYY.MM.DD.HH.mm  (zero-padded, UTC)
-// versionName = content of VERSION as-is
-val versionFile = file("${rootProject.projectDir}/VERSION")
+// versionName = content of VERSION_NAME as-is
+val versionFile = file("${rootProject.projectDir}/VERSION_NAME")
 val appVersionName = versionFile.readText().trim()
 val versionParts = appVersionName.split(".").map { it.toInt() }
-require(versionParts.size == 5) { "VERSION must contain exactly 5 parts: YYYY.MM.DD.HH.mm, got: $appVersionName" }
+require(versionParts.size == 5) { "VERSION_NAME must contain exactly 5 parts: YYYY.MM.DD.HH.mm, got: $appVersionName" }
 
-// versionCode = build number read from VERNUM file (commit count based)
-val appVersionCode = file("${rootProject.projectDir}/VERNUM").readText().trim().toInt()
+// versionCode = build number read from VERSION_CODE file (commit count based)
+val appVersionCode = file("${rootProject.projectDir}/VERSION_CODE").readText().trim().toInt()
 
 android {
     namespace = "io.github.dreamandroid.local"

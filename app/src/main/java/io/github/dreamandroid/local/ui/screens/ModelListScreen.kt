@@ -428,7 +428,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 TextButton(onClick = {
                     val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US)
                         .format(Date())
-                    val filename = "dreamandroid_log_$timestamp.log"
+                    val filename = "DreamHub_log_$timestamp.log"
                     scope.launch(Dispatchers.IO) {
                         val savedPath = try {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -437,7 +437,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                     put(MediaStore.Downloads.MIME_TYPE, "text/plain")
                                     put(
                                         MediaStore.Downloads.RELATIVE_PATH,
-                                        Environment.DIRECTORY_DOWNLOADS + "/dreamandroid",
+                                        Environment.DIRECTORY_DOWNLOADS + "/dreamhub",
                                     )
                                 }
                                 val resolver = context.contentResolver
@@ -448,13 +448,13 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                 resolver.openOutputStream(uri)?.use { out ->
                                     out.write(capturedLogs.toByteArray(Charsets.UTF_8))
                                 } ?: throw java.io.IOException("openOutputStream failed")
-                                "Downloads/dreamandroid/$filename"
+                                "Downloads/dreamhub/$filename"
                             } else {
                                 val dir = File(
                                     Environment.getExternalStoragePublicDirectory(
                                         Environment.DIRECTORY_DOWNLOADS,
                                     ),
-                                    "dreamandroid",
+                                    "dreamhub",
                                 )
                                 if (!dir.exists()) dir.mkdirs()
                                 val file = File(dir, filename)
@@ -680,7 +680,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                 title = {
                     Column {
                         Text(
-                            text = "dreamandroid ✨",
+                            text = "DreamHub ✨",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

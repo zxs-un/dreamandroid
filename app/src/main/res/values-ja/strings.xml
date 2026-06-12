@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <string name="app_name">dreamandroid</string>
+    <string name="app_name">DreamHub</string>
     <string name="anythingv5_description">Anime Image Generation</string>
     <string name="sdxl_base_description">SDXL General Image Generation</string>
     <string name="illustriousv16_description">WAI Illustrious SDXL v16</string>
