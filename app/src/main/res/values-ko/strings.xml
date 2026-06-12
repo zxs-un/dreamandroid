@@ -70,7 +70,7 @@
     <string name="got_it">알겠습니다!</string>
     <string name="yes">예</string>
     <string name="about_app">참고</string>
-    <string name="must_read">이 앱은 CPU/GPU와 일부 Qualcomm NPU에서 Stable Diffusion 이미지 생성을 실행할 수 있습니다.\n\nSD1.5 모델은 Hexagon V68 아키텍처 이상의 Snapdragon NPU에서 지원됩니다.\n\nSDXL 모델은 Snapdragon 8 Gen 3 이상 기기에서 지원됩니다.\n\n사용 중인 칩이 위 범위에 해당하지 않으면 CPU/GPU에서만 실행할 수 있습니다.\n\n이 프로젝트는 https://github.com/xororz/local-dream 의 포크이며, 여기에서 업스트림 소스 코드를 확인하거나 이슈를 제출할 수 있습니다.</string>
+    <string name="must_read">이 앱은 CPU/GPU와 일부 Qualcomm NPU에서 Stable Diffusion 이미지 생성을 실행할 수 있습니다.\n\nSD1.5 모델은 Hexagon V68 아키텍처 이상의 Snapdragon NPU에서 지원됩니다.\n\nSDXL 모델은 Snapdragon 8 Gen 3 이상 기기에서 지원됩니다.\n\n사용 중인 칩이 위 범위에 해당하지 않으면 CPU/GPU에서만 실행할 수 있습니다.\n\n이 프로젝트는 https://github.com/xororz/local-dream 의 포크입니다.\n\n이 소프트웨어는 학습 목적으로만 제공됩니다. 문제가 발생하면 직접 해결하시기 바랍니다. 어떠한 기술 지원이나 서비스도 제공되지 않습니다.\n\n이 소프트웨어는 "있는 그대로" 제공되며, 어떠한 명시적 또는 묵시적 보증도 하지 않습니다. 사용에 따른 위험은 본인이 부담합니다.</string>
     <string name="help">도움말</string>
 
     <!-- Model List Screen -->

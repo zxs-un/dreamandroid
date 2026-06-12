@@ -280,7 +280,7 @@ private fun AppContent() {
                     modelId = modelId,
                     modelName = modelName,
                     isNpu = false,
-                    progressText = stringResource(R.string.preparing_model),
+                    progressText = context.getString(R.string.preparing_model),
                     byteProgress = null,
                 )
                 scope.launch {
@@ -326,7 +326,7 @@ private fun AppContent() {
                     modelId = modelId,
                     modelName = modelName,
                     isNpu = true,
-                    progressText = stringResource(R.string.preparing_model),
+                    progressText = context.getString(R.string.preparing_model),
                     byteProgress = null,
                 )
                 scope.launch {

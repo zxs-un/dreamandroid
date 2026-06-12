@@ -70,7 +70,7 @@
     <string name="got_it">知道了!</string>
     <string name="yes">是</string>
     <string name="about_app">须知</string>
-    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n支持在 Hexagon V68 架构及以上的骁龙 NPU 上运行 SD1.5 模型。\n\n支持在骁龙 8 Gen 3 及更新的设备上运行 SDXL 模型。\n\n若您的芯片不在上述范围内，则只能使用 CPU/GPU 运行。\n\n本项目基于 https://github.com/xororz/local-dream 的fork，可在此查看上游源代码或提交问题</string>
+    <string name="must_read">此APP支持在CPU/GPU和部分高通NPU上运行stable diffusion图像生成。\n\n支持在 Hexagon V68 架构及以上的骁龙 NPU 上运行 SD1.5 模型。\n\n支持在骁龙 8 Gen 3 及更新的设备上运行 SDXL 模型。\n\n若您的芯片不在上述范围内，则只能使用 CPU/GPU 运行。\n\n本项目基于 https://github.com/xororz/local-dream 的fork。\n\n本软件仅供学习参考，如有问题请自行解决，不提供任何技术支持与服务。\n\n本软件按"原样"提供，不附带任何形式的明示或默示担保。使用风险自负。</string>
     <string name="help">帮助</string>
 
     <!-- Model List Screen -->
