@@ -16,3 +16,4 @@ app/src/main/assets/qnnlibs
 *.jks
 *.keystore
 keystore.properties
+$null
