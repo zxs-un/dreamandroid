@@ -36,6 +36,13 @@ class GenerationPreferences(private val context: Context) {
     private val SHARE_CLEAR_CLIPBOARD_KEY =
         booleanPreferencesKey("share_clear_clipboard_on_import")
 
+    // Screen-level (global) keys — persist across model switches
+    private val GLOBAL_PROMPT_KEY = stringPreferencesKey("global_prompt")
+    private val GLOBAL_NEGATIVE_PROMPT_KEY = stringPreferencesKey("global_negative_prompt")
+    private val GLOBAL_BATCH_COUNTS_KEY = intPreferencesKey("global_batch_counts")
+    private val GLOBAL_WIDTH_KEY = intPreferencesKey("global_width")
+    private val GLOBAL_HEIGHT_KEY = intPreferencesKey("global_height")
+
     fun observeShareUseBase64(): Flow<Boolean> = context.dataStore.data
         .catch { exception ->
             if (exception is IOException) emit(emptyPreferences()) else throw exception
@@ -78,6 +85,32 @@ class GenerationPreferences(private val context: Context) {
             preferences[SELECTED_SOURCE_KEY] ?: "huggingface"
         }.first()
 
+    // ---- Screen-level (global) persistence for prompt / negative / batch / width / height ----/
+    suspend fun saveGlobalFields(prompt: String, negativePrompt: String, batchCounts: Int, width: Int, height: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[GLOBAL_PROMPT_KEY] = prompt
+            preferences[GLOBAL_NEGATIVE_PROMPT_KEY] = negativePrompt
+            preferences[GLOBAL_BATCH_COUNTS_KEY] = batchCounts
+            preferences[GLOBAL_WIDTH_KEY] = width
+            preferences[GLOBAL_HEIGHT_KEY] = height
+        }
+    }
+
+    suspend fun getGlobalPrompt(): String = context.dataStore.data
+        .map { it[GLOBAL_PROMPT_KEY] ?: "" }.first()
+
+    suspend fun getGlobalNegativePrompt(): String = context.dataStore.data
+        .map { it[GLOBAL_NEGATIVE_PROMPT_KEY] ?: "" }.first()
+
+    suspend fun getGlobalBatchCounts(): Int = context.dataStore.data
+        .map { it[GLOBAL_BATCH_COUNTS_KEY] ?: 1 }.first()
+
+    suspend fun getGlobalWidth(): Int = context.dataStore.data
+        .map { it[GLOBAL_WIDTH_KEY] ?: 512 }.first()
+
+    suspend fun getGlobalHeight(): Int = context.dataStore.data
+        .map { it[GLOBAL_HEIGHT_KEY] ?: 512 }.first()
+
     suspend fun saveAllFields(
         modelId: String,
         prompt: String,
@@ -94,6 +127,7 @@ class GenerationPreferences(private val context: Context) {
         aspectRatio: String = "1:1",
     ) {
         context.dataStore.edit { preferences ->
+            // Per-model fields
             preferences[getPromptKey(modelId)] = prompt
             preferences[getNegativePromptKey(modelId)] = negativePrompt
             preferences[getStepsKey(modelId)] = steps
@@ -106,6 +140,12 @@ class GenerationPreferences(private val context: Context) {
             preferences[getBatchCountsKey(modelId)] = batchCounts
             preferences[getSchedulerKey(modelId)] = scheduler
             preferences[getAspectRatioKey(modelId)] = aspectRatio
+            // Also persist globally (screen-level) for GenerateScreen
+            preferences[GLOBAL_PROMPT_KEY] = prompt
+            preferences[GLOBAL_NEGATIVE_PROMPT_KEY] = negativePrompt
+            preferences[GLOBAL_BATCH_COUNTS_KEY] = batchCounts
+            preferences[GLOBAL_WIDTH_KEY] = width
+            preferences[GLOBAL_HEIGHT_KEY] = height
         }
     }
 

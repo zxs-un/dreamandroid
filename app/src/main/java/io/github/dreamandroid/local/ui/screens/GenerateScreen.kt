@@ -48,6 +48,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -160,12 +161,11 @@ fun GenerateScreen(
             withContext(Dispatchers.IO) {
                 val prefs = generationPreferences.getPreferences(modelId).first()
                 withContext(Dispatchers.Main) {
-                    if (prefs.prompt.isNotEmpty()) onPromptChange(prefs.prompt)
-                    if (prefs.negativePrompt.isNotEmpty()) onNegativePromptChange(prefs.negativePrompt)
+                    // prompt / negativePrompt / batchCounts intentionally NOT loaded:
+                    // they are screen-level state and persist across model switches.
                     if (prefs.steps > 0) onStepsChange(prefs.steps)
                     if (prefs.cfg > 0) onCfgChange(prefs.cfg)
                     if (prefs.seed.isNotEmpty()) onSeedChange(prefs.seed)
-                    if (prefs.batchCounts > 0) onBatchCountsChange(prefs.batchCounts)
                     onSchedulerChange(prefs.scheduler)
                     onDenoiseStrengthChange(prefs.denoiseStrength)
                     onUseOpenCLChange(prefs.useOpenCL)
@@ -193,23 +193,30 @@ fun GenerateScreen(
     }
 
     fun saveAllFields() {
-        if (modelId == null) return
         scope.launch(Dispatchers.IO) {
-            generationPreferences.saveAllFields(
-                modelId = modelId,
+            // Screen-level fields — persist regardless of model
+            generationPreferences.saveGlobalFields(
                 prompt = prompt,
                 negativePrompt = negativePrompt,
-                steps = steps,
-                cfg = cfg,
-                seed = seed,
+                batchCounts = batchCounts,
                 width = width,
                 height = height,
-                denoiseStrength = denoiseStrength,
-                useOpenCL = useOpenCL,
-                batchCounts = batchCounts,
-                scheduler = scheduler,
-                aspectRatio = "1:1",
             )
+            // Per-model fields
+            if (modelId != null) {
+                generationPreferences.saveAllFields(
+                    modelId = modelId,
+                    steps = steps,
+                    cfg = cfg,
+                    seed = seed,
+                    width = width,
+                    height = height,
+                    denoiseStrength = denoiseStrength,
+                    useOpenCL = useOpenCL,
+                    scheduler = scheduler,
+                    aspectRatio = inferAspectRatioString(width, height),
+                )
+            }
         }
     }
 
@@ -370,7 +377,7 @@ fun GenerateScreen(
                         putExtra("denoise_strength", denoiseStrength)
                         putExtra("use_opencl", useOpenCL)
                         putExtra("scheduler", scheduler)
-                        putExtra("aspect_ratio", "1:1")
+                        putExtra("aspect_ratio", inferAspectRatioString(width, height))
                     }
 
                     // Guard: if the batch was cancelled (user clicked stop),
@@ -646,6 +653,44 @@ fun GenerateScreen(
                 maxLines = 3,
                 shape = MaterialTheme.shapes.medium,
             )
+
+            // ---- Width / Height (screen-level, below negative prompt) ----/
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = width.toString(),
+                    onValueChange = { text ->
+                        val num = text.filter { it.isDigit() }.toIntOrNull()
+                        if (num != null && num in 64..4096) {
+                            onWidthChange(num)
+                            saveAllFields()
+                        }
+                    },
+                    label = { Text("W") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium,
+                )
+                OutlinedTextField(
+                    value = height.toString(),
+                    onValueChange = { text ->
+                        val num = text.filter { it.isDigit() }.toIntOrNull()
+                        if (num != null && num in 64..4096) {
+                            onHeightChange(num)
+                            saveAllFields()
+                        }
+                    },
+                    label = { Text("H") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium,
+                )
+            }
 
             HorizontalDivider()
 

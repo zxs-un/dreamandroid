@@ -2729,7 +2729,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
 
                                             // ---- Zero-Trust: Wait with timeout ----
                                             val result = withTimeoutOrNull(
-                                                BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS
+                                                BackgroundGenerationService.getServiceWaitTimeoutMs(context)
                                             ) {
                                                 BackgroundGenerationService.generationState
                                                     .first { state ->
@@ -2766,7 +2766,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                             val waitStartTime = System.currentTimeMillis()
                                             while (BackgroundGenerationService.isServiceRunning.value) {
                                                 if (System.currentTimeMillis() - waitStartTime >
-                                                        BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS
+                                                        BackgroundGenerationService.getServiceWaitTimeoutMs(context)
                                                 ) {
                                                     Log.w("ModelRunScreen", "Service stop timeout")
                                                     context.sendBroadcast(

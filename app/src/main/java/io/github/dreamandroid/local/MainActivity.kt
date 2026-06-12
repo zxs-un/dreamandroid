@@ -165,10 +165,9 @@ private fun AppContent() {
 
     // ---- Generation parameters (shared between top bar and screen) ----
     val model = remember(selectedModelId) { modelRepository.models.find { it.id == selectedModelId } }
-    var genPrompt by remember(selectedModelId) { mutableStateOf(model?.defaultPrompt ?: "") }
-    var genNegativePrompt by remember(selectedModelId) {
-        mutableStateOf(model?.defaultNegativePrompt ?: "")
-    }
+    // prompt / negative prompt / batchCounts: screen-level state, NOT reset on model switch
+    var genPrompt by remember { mutableStateOf("") }
+    var genNegativePrompt by remember { mutableStateOf("") }
     var genSteps by remember { mutableFloatStateOf(20f) }
     var genCfg by remember { mutableFloatStateOf(7f) }
     var genSeed by remember { mutableStateOf("") }
@@ -176,24 +175,10 @@ private fun AppContent() {
     var genScheduler by remember { mutableStateOf("dpm") }
     var genDenoiseStrength by remember { mutableFloatStateOf(0.6f) }
     var genUseOpenCL by remember { mutableStateOf(false) }
-    var genWidth by remember(selectedModelId) {
-        mutableIntStateOf(
-            when {
-                model?.isSdxl == true -> 1024
-                model?.runOnCpu == true -> 256
-                else -> 512
-            }
-        )
-    }
-    var genHeight by remember(selectedModelId) {
-        mutableIntStateOf(
-            when {
-                model?.isSdxl == true -> 1024
-                model?.runOnCpu == true -> 256
-                else -> 512
-            }
-        )
-    }
+    // Aspect ratio is screen-level — persists across model switches.
+    // Width/Height are also screen-level, set directly by user.
+    var genWidth by remember { mutableIntStateOf(512) }
+    var genHeight by remember { mutableIntStateOf(512) }
 
     // ---- Batch generation state (driven by GenerateScreen, consumed by GenerateTopBar) ----
     val serviceState by BackgroundGenerationService.generationState.collectAsState()
@@ -202,8 +187,6 @@ private fun AppContent() {
     // Stop button remains visible while the generation service is still running,
     // even if the state was reset to Idle by a soft-stop request.
     val isGenerating = progressState != null || isServiceRunning
-    val progressPercent = if (progressState != null) (progressState.progress * 100).toInt() else 0
-    val hasProgressDetail = progressState != null && progressState.totalSteps > 0
     var genBatchIndex by remember { mutableIntStateOf(0) }
     var genBatchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var genGenerateTrigger by remember { mutableIntStateOf(0) }
@@ -307,25 +290,32 @@ private fun AppContent() {
     var showNoModelWarning by remember { mutableStateOf(false) }
     val generationPreferences = remember { GenerationPreferences(context) }
 
+    // Load screen-level (global) preferences once on startup
+    LaunchedEffect(Unit) {
+        genPrompt = generationPreferences.getGlobalPrompt()
+        genNegativePrompt = generationPreferences.getGlobalNegativePrompt()
+        genBatchCounts = generationPreferences.getGlobalBatchCounts().coerceAtLeast(1)
+        genWidth = generationPreferences.getGlobalWidth().coerceIn(64, 4096)
+        genHeight = generationPreferences.getGlobalHeight().coerceIn(64, 4096)
+    }
+
     // Load preferences when model changes
     LaunchedEffect(selectedModelId) {
         if (selectedModelId != null) {
             val prefs = generationPreferences.getPreferences(selectedModelId!!)
             prefs.first().let { p ->
-                if (p.prompt.isNotEmpty()) genPrompt = p.prompt
-                if (p.negativePrompt.isNotEmpty()) genNegativePrompt = p.negativePrompt
+                // prompt / negative prompt / batchCounts / width / height intentionally NOT loaded:
+                // they are screen-level state and persist across model switches.
                 if (p.steps > 0) genSteps = p.steps
                 if (p.cfg > 0) genCfg = p.cfg
                 if (p.seed.isNotEmpty()) genSeed = p.seed
-                if (p.batchCounts > 0) genBatchCounts = p.batchCounts
                 genScheduler = p.scheduler
                 genDenoiseStrength = p.denoiseStrength
                 genUseOpenCL = p.useOpenCL
-                if (p.width > 0) genWidth = p.width
-                if (p.height > 0) genHeight = p.height
             }
         }
     }
+
 
     // Dialog: no model warning
     if (showNoModelWarning) {
@@ -525,16 +515,14 @@ private fun AppContent() {
                                 modelRefreshVersion++
                                 // Update selectedModelId to the new ID
                                 selectedModelId = newName.replace(" ", "")
+                                val renameSuccessMsg = getString(R.string.rename_success)
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        stringResource(R.string.rename_success)
-                                    )
+                                    snackbarHostState.showSnackbar(renameSuccessMsg)
                                 }
                             } else {
+                                val renameFailedMsg = getString(R.string.rename_failed, "directory error")
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        stringResource(R.string.rename_failed, "directory error")
-                                    )
+                                    snackbarHostState.showSnackbar(renameFailedMsg)
                                 }
                             }
                         }
@@ -574,16 +562,14 @@ private fun AppContent() {
                                 if (selectedModelId == model.id) selectedModelId = null
                                 modelRepository.refreshAllModels()
                                 modelRefreshVersion++
+                                val deleteSuccessMsg = getString(R.string.delete_success)
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        stringResource(R.string.delete_success)
-                                    )
+                                    snackbarHostState.showSnackbar(deleteSuccessMsg)
                                 }
                             } else {
+                                val deleteFailedMsg = getString(R.string.delete_failed)
                                 scope.launch {
-                                    snackbarHostState.showSnackbar(
-                                        stringResource(R.string.delete_failed)
-                                    )
+                                    snackbarHostState.showSnackbar(deleteFailedMsg)
                                 }
                             }
                         }
@@ -655,8 +641,6 @@ private fun AppContent() {
                         batchCounts = genBatchCounts,
                         batchIndex = genBatchIndex,
                         isRunning = isGenerating,
-                        progressPercent = progressPercent,
-                        hasProgressDetail = hasProgressDetail,
                         onGenerate = { genGenerateTrigger++ },
                         onStop = {
                             val now = System.currentTimeMillis()
@@ -884,8 +868,6 @@ private fun GenerateTopBar(
     batchCounts: Int = 1,
     batchIndex: Int = 0,
     isRunning: Boolean = false,
-    progressPercent: Int = 0,
-    hasProgressDetail: Boolean = false,
     onGenerate: () -> Unit = {},
     onStop: () -> Unit = {},
 ) {
@@ -962,28 +944,14 @@ private fun GenerateTopBar(
         },
         actions = {
             if (isRunning) {
-                // Step progress + stop button on the RIGHT
+                // Spinner + stop button on the RIGHT
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (hasProgressDetail) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.5.dp,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "${progressPercent}%",
-                            maxLines = 1,
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                    } else {
-                        CircularProgressIndicator(
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp)
-                                .size(24.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .size(24.dp),
+                        strokeWidth = 2.dp,
+                    )
                     IconButton(onClick = onStop) {
                         Icon(
                             Icons.Default.Stop,

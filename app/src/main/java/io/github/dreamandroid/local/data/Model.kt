@@ -304,7 +304,7 @@ class UpscalerRepository(private val context: Context) {
                 if (!dir.isDirectory) return@forEach
 
                 val modelId = dir.name
-                if (Model.isReservedModelId(modelId)) return@forEach
+                if (ModelRepository.isReservedModelId(modelId)) return@forEach
 
                 val customFile = File(dir, "upscaler_custom")
                 if (!customFile.exists()) return@forEach

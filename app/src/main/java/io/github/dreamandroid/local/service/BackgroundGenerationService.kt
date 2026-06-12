@@ -388,7 +388,6 @@ class BackgroundGenerationService : Service() {
         scheduler: String,
         aspectRatio: String,
     ) = withContext(Dispatchers.IO) {
-        try {
             val preferences =
                 applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
             val showProcess = preferences.getBoolean("show_diffusion_process", false)
