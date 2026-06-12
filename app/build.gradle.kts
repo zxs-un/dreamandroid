@@ -57,6 +57,12 @@ android {
                 storePassword = storePassProp
                 keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
                 keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+            } else {
+                // Fallback to debug keystore when no release keystore is provided
+                storeFile = signingConfigs.getByName("debug").storeFile
+                storePassword = signingConfigs.getByName("debug").storePassword
+                keyAlias = signingConfigs.getByName("debug").keyAlias
+                keyPassword = signingConfigs.getByName("debug").keyPassword
             }
         }
     }
