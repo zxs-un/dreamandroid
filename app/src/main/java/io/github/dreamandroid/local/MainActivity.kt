@@ -27,6 +27,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import kotlinx.coroutines.flow.first
+import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.dreamandroid.local.data.*
@@ -347,6 +349,7 @@ private fun AppContent() {
         visible = isConverting,
     ) {
         SmoothLinearWavyProgressIndicator(
+            progress = extractByteProgress?.fraction ?: 0f,
             modifier = Modifier.fillMaxWidth(),
         )
         Text(
@@ -905,28 +908,25 @@ private fun ColumnScope.AppSettingsDrawerContent(modifier: Modifier = Modifier) 
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Switch(checked = dynamicColor, onCheckedChange = {
-                dynamicColor = it
-                themeController.setDynamicColor(it)
+            Switch(checked = dynamicColor, onCheckedChange = { checked ->
+                dynamicColor = checked
+                themeController.update { it.copy(dynamicColor = checked) }
             })
         }
 
-        var darkMode by remember {
-            mutableStateOf(DarkModePreference(context).get())
-        }
+        var darkMode by remember { mutableStateOf(themeController.state.darkMode) }
         Text(stringResource(R.string.dark_mode))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                DarkMode.SYSTEM to stringResource(R.string.dark_mode_system),
-                DarkMode.LIGHT to stringResource(R.string.dark_mode_light),
-                DarkMode.DARK to stringResource(R.string.dark_mode_dark),
+                DarkModePreference.SYSTEM to stringResource(R.string.dark_mode_system),
+                DarkModePreference.LIGHT to stringResource(R.string.dark_mode_light),
+                DarkModePreference.DARK to stringResource(R.string.dark_mode_dark),
             ).forEach { (mode, label) ->
                 FilterChip(
                     selected = darkMode == mode,
                     onClick = {
                         darkMode = mode
-                        DarkModePreference(context).set(mode)
-                        themeController.setDarkMode(mode)
+                        themeController.update { it.copy(darkMode = mode) }
                     },
                     label = { Text(label) },
                 )
