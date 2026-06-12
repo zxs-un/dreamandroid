@@ -161,8 +161,8 @@ fun GenerateScreen(
             withContext(Dispatchers.IO) {
                 val prefs = generationPreferences.getPreferences(modelId).first()
                 withContext(Dispatchers.Main) {
-                    // prompt / negativePrompt / batchCounts intentionally NOT loaded:
-                    // they are screen-level state and persist across model switches.
+                    // prompt / negativePrompt / batchCounts: screen-level (global) values
+                    // take priority; fallback is handled by the parent (MainActivity).
                     if (prefs.steps > 0) onStepsChange(prefs.steps)
                     if (prefs.cfg > 0) onCfgChange(prefs.cfg)
                     if (prefs.seed.isNotEmpty()) onSeedChange(prefs.seed)

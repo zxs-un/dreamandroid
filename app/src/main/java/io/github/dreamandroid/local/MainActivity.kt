@@ -304,8 +304,11 @@ private fun AppContent() {
         if (selectedModelId != null) {
             val prefs = generationPreferences.getPreferences(selectedModelId!!)
             prefs.first().let { p ->
-                // prompt / negative prompt / batchCounts / width / height intentionally NOT loaded:
-                // they are screen-level state and persist across model switches.
+                // Screen-level (global) values take priority;
+                // fall back to model-specific saved values when global is empty/default.
+                if (genPrompt.isEmpty() && p.prompt.isNotEmpty()) genPrompt = p.prompt
+                if (genNegativePrompt.isEmpty() && p.negativePrompt.isNotEmpty()) genNegativePrompt = p.negativePrompt
+                if (genBatchCounts == 1 && p.batchCounts > 1) genBatchCounts = p.batchCounts
                 if (p.steps > 0) genSteps = p.steps
                 if (p.cfg > 0) genCfg = p.cfg
                 if (p.seed.isNotEmpty()) genSeed = p.seed
