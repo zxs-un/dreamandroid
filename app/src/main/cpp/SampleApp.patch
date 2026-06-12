@@ -100,18 +100,6 @@ diff --git a/3rdparty/SampleApp/src/QnnSampleApp.cpp b/3rdparty/SampleApp/src/Qn
  
    // inspect binary info
    auto returnStatus = StatusCode::SUCCESS;
-diff --git a/3rdparty/SampleApp/src/QnnSampleApp.hpp b/3rdparty/SampleApp/src/QnnSampleApp.hpp
---- a/3rdparty/SampleApp/src/QnnSampleApp.hpp
-+++ b/3rdparty/SampleApp/src/QnnSampleApp.hpp
-@@ -82,7 +82,7 @@
- 
-   StatusCode verifyFailReturnStatus(Qnn_ErrorHandle_t errCode);
- 
-- private:
-+//  private:
-   StatusCode extractBackendProfilingInfo(Qnn_ProfileHandle_t profileHandle);
- 
-   StatusCode extractProfilingSubEvents(QnnProfile_EventId_t profileEventId);
 diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.cpp b/3rdparty/SampleApp/src/Utils/IOTensor.cpp
 --- a/3rdparty/SampleApp/src/Utils/IOTensor.cpp
 +++ b/3rdparty/SampleApp/src/Utils/IOTensor.cpp
@@ -173,15 +161,6 @@ diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.cpp b/3rdparty/SampleApp/src/
 diff --git a/3rdparty/SampleApp/src/Utils/IOTensor.hpp b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
 --- a/3rdparty/SampleApp/src/Utils/IOTensor.hpp
 +++ b/3rdparty/SampleApp/src/Utils/IOTensor.hpp
-@@ -71,7 +71,7 @@
-                                            size_t numInputTensors,
-                                            size_t numOutputTensors);
- 
-- private:
-+//  private:
-   PopulateInputTensorsRetType_t populateInputTensor(const std::vector<std::string> &filePaths,
-                                                     const size_t filePathsIndexOffset,
-                                                     const bool loopBackToStart,
 @@ -91,6 +91,8 @@
  #ifndef __hexagon__
    StatusCode convertToFloat(float **out, Qnn_Tensor_t *output);
