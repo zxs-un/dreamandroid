@@ -167,6 +167,17 @@ jobs:
       - name: Checkout dreamandroid
         uses: actions/checkout@v4
 
+      # -------- validate VERSION format --------
+      - name: Validate VERSION
+        run: |
+          VERSION=$(cat VERSION)
+          if ! echo "$VERSION" | grep -qP '^\d{4}\.\d{2}\.\d{2}\.\d{2}\.\d{2}$'; then
+            echo "❌ VERSION format invalid: '$VERSION'"
+            echo "   Expected format: YYYY.MM.DD.HH.mm (e.g. 2026.06.12.06.00)"
+            exit 1
+          fi
+          echo "✅ VERSION: $VERSION"
+
       # -------- JDK & Android SDK (check version, install only if missing) --------
       - name: Verify JDK
         id: jdk

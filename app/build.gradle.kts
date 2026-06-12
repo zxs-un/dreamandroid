@@ -25,6 +25,19 @@ detekt {
     source.setFrom(files("src/main/java", "src/main/kotlin"))
 }
 
+// Read app version from VERSION file at project root.
+// Format: YYYY.MM.DD.HH.mm  (zero-padded, UTC)
+// versionName = content of VERSION as-is
+val versionFile = file("${rootProject.projectDir}/VERSION")
+val appVersionName = versionFile.readText().trim()
+val versionParts = appVersionName.split(".").map { it.toInt() }
+require(versionParts.size == 5) { "VERSION must contain exactly 5 parts: YYYY.MM.DD.HH.mm, got: $appVersionName" }
+
+// versionCode = Unix timestamp derived from the VERSION file contents (UTC)
+val appVersionCode = java.time.LocalDateTime.of(
+    versionParts[0], versionParts[1], versionParts[2], versionParts[3], versionParts[4]
+).toEpochSecond(java.time.ZoneOffset.UTC).toInt()
+
 android {
     namespace = "io.github.dreamandroid.local"
     compileSdk = 36
@@ -34,8 +47,8 @@ android {
         minSdk = 28
 //        minSdk = 31
         targetSdk = 36
-        versionCode = 70
-        versionName = "2.6.3"
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

@@ -318,7 +318,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                         .padding(vertical = 8.dp),
                 ) {
                     val mustReadText = stringResource(R.string.must_read)
-                    val githubUrl = "https://github.com/dreamandroid/dreamandroid"
+                    val githubUrl = "https://github.com/xororz/local-dream"
                     val linkColor = MaterialTheme.colorScheme.primary
 
                     val annotatedString = buildAnnotatedString {
