@@ -746,7 +746,7 @@ class QnnModel : public QnnSampleApp {
     }
 
     if (ProfilingLevel::OFF != m_profilingLevel) {
-      extractBackendProfilingInfo(m_profileBackendHandle);
+      extractBackendProfilingInfo(m_profileBackendHandle, nullptr);
     }
 
     m_isContextCreated = true;
