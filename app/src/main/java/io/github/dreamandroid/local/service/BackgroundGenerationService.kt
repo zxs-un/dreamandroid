@@ -321,8 +321,6 @@ class BackgroundGenerationService : Service() {
         aspectRatio: String,
     ) = withContext(Dispatchers.IO) {
         try {
-            updateState(GenerationState.Progress(0f))
-
             val preferences =
                 applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
             val showProcess = preferences.getBoolean("show_diffusion_process", false)
@@ -369,6 +367,9 @@ class BackgroundGenerationService : Service() {
                         ),
                     )
                 }
+
+                // Connection established — signal 0% progress
+                updateState(GenerationState.Progress(0f))
 
                 response.body?.let { responseBody ->
                     Log.d("BgGenService", "Reading streaming response")
@@ -557,7 +558,6 @@ class BackgroundGenerationService : Service() {
                 Log.e("BgGenService", "Unexpected generation error", e)
                 updateState(GenerationState.Error(e.message ?: "Unexpected error"))
             }
-        }
     }
 
     private fun createNotificationChannel() {
