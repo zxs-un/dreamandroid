@@ -40,7 +40,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
-import androidx.navigation.NavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
@@ -64,7 +63,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
+fun UpscaleScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val modelId = "upscaler_standalone"
@@ -296,33 +295,17 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.image_upscale)) },
-                navigationIcon = {
-                    IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.back),
-                        )
-                    }
-                },
-            )
-        },
-    ) { paddingValues ->
-        Box(
-            modifier = Modifier
+    // ---- UI Content ----
+    Box(
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Column(
+            modifier = modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Column(
-                modifier = modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
                 ElevatedCard(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -613,7 +596,6 @@ fun UpscaleScreen(navController: NavController, modifier: Modifier = Modifier) {
                     )
                 }
             }
-        }
     }
 
     if (showUpscalerDialog) {

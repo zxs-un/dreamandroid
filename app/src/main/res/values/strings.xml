@@ -361,4 +361,29 @@
     <string name="history_filter_sort_desc">Newest first</string>
     <string name="history_filter_sort_asc">Oldest first</string>
     <string name="history_view_filter">Filter</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_models">Models</string>
+    <string name="nav_generate">Generate</string>
+    <string name="nav_upscale">Upscale</string>
+    <string name="nav_browse">Browse</string>
+
+    <!-- Model Management -->
+    <string name="load_model">Load model</string>
+    <string name="unload_model">Unload model</string>
+    <string name="loading_model_label">Loading model…</string>
+    <string name="model_loaded">Model loaded</string>
+    <string name="model_unloaded">Model unloaded</string>
+    <string name="model_load_failed">Failed to load model: %s</string>
+    <string name="no_model_loaded">No model loaded</string>
+    <string name="no_model_loaded_hint">Please load a model in the Models tab first</string>
+    <string name="select_model_hint">Tap switch to select a model, then click Load</string>
+    <string name="import_model">Import model file</string>
+    <string name="import_npu_model">Import NPU model zip</string>
+
+    <!-- Browse Screen -->
+    <string name="no_generated_images">No generated images yet</string>
+    <string name="no_generated_images_hint">Generate images first to see them here</string>
+    <string name="image_saved_to_gallery">Saved to gallery</string>
+    <string name="image_save_failed">Failed to save image</string>
 </resources>
