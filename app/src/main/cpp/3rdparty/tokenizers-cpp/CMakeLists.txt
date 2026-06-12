@@ -104,13 +104,9 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/google/sentencepiece.git
   GIT_TAG    v0.2.0
 )
-FetchContent_GetProperties(sentencepiece)
-if(NOT sentencepiece_POPULATED)
-  FetchContent_Populate(sentencepiece)
-  set(SPM_ENABLE_SHARED OFF CACHE BOOL "" FORCE)
-  set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
-  add_subdirectory(${sentencepiece_SOURCE_DIR} ${sentencepiece_BINARY_DIR} EXCLUDE_FROM_ALL)
-endif()
+set(SPM_ENABLE_SHARED OFF CACHE BOOL "" FORCE)
+set(SPM_ENABLE_TCMALLOC OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(sentencepiece)
 
 option(MLC_ENABLE_SENTENCEPIECE_TOKENIZER "Enable SentencePiece tokenizer" ON)
 
