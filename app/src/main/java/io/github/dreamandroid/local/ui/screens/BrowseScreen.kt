@@ -9,7 +9,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
+// import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -24,12 +24,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
+// import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
+// import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -147,7 +147,7 @@ fun BrowseScreen(modifier: Modifier = Modifier) {
                             selectedItems.toList().forEach { item ->
                                 val bitmap = try {
                                     withContext(Dispatchers.IO) {
-                                        BitmapFactory.decodeFile(item.filePath)
+                                        BitmapFactory.decodeFile(item.imageFile.absolutePath)
                                     }
                                 } catch (_: Exception) { null }
                                 if (bitmap != null) {
@@ -236,14 +236,14 @@ fun BrowseScreen(modifier: Modifier = Modifier) {
                         IconButton(onClick = {
                             scope.launch(Dispatchers.IO) {
                                 val bitmap = try {
-                                    BitmapFactory.decodeFile(item.filePath)
+                                    BitmapFactory.decodeFile(item.imageFile.absolutePath)
                                 } catch (_: Exception) { null }
                                 if (bitmap != null) {
                                     saveBitmapToGallery(context, bitmap, item.modelId)
                                     withContext(Dispatchers.Main) {
                                         Toast.makeText(
                                             context,
-                                            stringResource(R.string.image_saved),
+                                            context.getString(R.string.image_saved),
                                             Toast.LENGTH_SHORT,
                                         ).show()
                                     }
@@ -264,15 +264,15 @@ fun BrowseScreen(modifier: Modifier = Modifier) {
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val bitmap = remember(item.filePath) {
+                    val bitmap = remember(item.imageFile.absolutePath) {
                         try {
-                            BitmapFactory.decodeFile(item.filePath)
+                            BitmapFactory.decodeFile(item.imageFile.absolutePath)
                         } catch (_: Exception) { null }
                     }
                     bitmap?.let {
                         AsyncImage(
                             model = ImageRequest.Builder(context)
-                                .data(item.filePath)
+                                .data(item.imageFile.absolutePath)
                                 .crossfade(true)
                                 .build(),
                             contentDescription = "Generated image",
@@ -455,7 +455,7 @@ fun BrowseScreen(modifier: Modifier = Modifier) {
                         Column {
                             AsyncImage(
                                 model = ImageRequest.Builder(context)
-                                    .data(item.filePath)
+                                    .data(item.imageFile.absolutePath)
                                     .crossfade(true)
                                     .build(),
                                 contentDescription = "Generated image",
@@ -527,7 +527,7 @@ fun BrowseScreen(modifier: Modifier = Modifier) {
                 text = {
                     AsyncImage(
                         model = ImageRequest.Builder(context)
-                            .data(item.filePath)
+                            .data(item.imageFile.absolutePath)
                             .crossfade(true)
                             .build(),
                         contentDescription = "Preview",
@@ -554,15 +554,15 @@ private suspend fun saveBitmapToGallery(
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
-                put(MediaStore.Images.DISPLAY_NAME, filename)
-                put(MediaStore.Images.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
                 put(
-                    MediaStore.Images.RELATIVE_PATH,
+                    MediaStore.Images.Media.RELATIVE_PATH,
                     Environment.DIRECTORY_PICTURES + "/DreamHub",
                 )
             }
             val uri = context.contentResolver.insert(
-                MediaStore.Images.EXTERNAL_CONTENT_URI,
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
                 values,
             ) ?: return@withContext false
             context.contentResolver.openOutputStream(uri)?.use { out ->

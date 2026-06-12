@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -15,10 +16,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
+// import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+// import androidx.compose.ui.focus.FocusRequester
+// import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
@@ -39,6 +40,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 
 /**
  * GenerateScreen – image generation with flattened advanced settings.
@@ -146,7 +148,7 @@ fun GenerateScreen(
         when (val state = serviceState) {
             is BackgroundGenerationService.GenerationState.Progress -> {
                 progress = state.progress
-                state.bitmap?.let { intermediateBitmap = it }
+                state.intermediateImage?.let { intermediateBitmap = it }
             }
             is BackgroundGenerationService.GenerationState.Complete -> {
                 isRunning = false
@@ -176,6 +178,7 @@ fun GenerateScreen(
                             modelId = modelId ?: "unknown",
                             bitmap = bmp,
                             params = params,
+                            mode = GenerationMode.TXT2IMG,
                         )
                     }
                 }
@@ -615,19 +618,15 @@ fun GenerateScreen(
                                         saveImage(
                                             context, bitmap,
                                             onSuccess = {
-                                                withContext(Dispatchers.Main) {
-                                                    Toast.makeText(
-                                                        context,
-                                                        stringResource(R.string.image_saved),
-                                                        Toast.LENGTH_SHORT,
-                                                    ).show()
-                                                }
+                                                Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.image_saved),
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
                                             },
                                             onError = { err ->
-                                                withContext(Dispatchers.Main) {
-                                                    Toast.makeText(context, err, Toast.LENGTH_SHORT)
-                                                        .show()
-                                                }
+                                                Toast.makeText(context, err, Toast.LENGTH_SHORT)
+                                                    .show()
                                             },
                                         )
                                     }

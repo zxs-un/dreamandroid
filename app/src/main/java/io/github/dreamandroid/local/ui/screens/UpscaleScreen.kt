@@ -733,12 +733,12 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
     }
 }
 
-sealed class BackendState {
-    object Idle : BackendState()
-    object Starting : BackendState()
-    object Running : BackendState()
-    data class Error(val message: String) : BackendState()
-}
+// sealed class BackendState {
+//     object Idle : BackendState()
+//     object Starting : BackendState()
+//     object Running : BackendState()
+//     data class Error(val message: String) : BackendState()
+// }
 
 fun prepareRuntimeDir(context: Context): File {
     val runtimeDir = File(context.filesDir, "runtime_libs").apply {
