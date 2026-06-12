@@ -1,13 +1,13 @@
 # DreamHub
 
-**Android Stable Diffusion with Snapdragon NPU acceleration — SDK Migration Fork**
+**Run Stable Diffusion on recent Android devices**
 
 > [!NOTE]
 > This is a **fork** of [xororz/local-dream](https://github.com/xororz/local-dream),
-> focused on **SDK migration and build system hardening**.
+> focused on **build CI** and **UI redesign**.
 >
-> This fork does **not** add new features.  It adapts the codebase to older Android
-> SDK releases and removes experimental Material3 APIs that were present in upstream.
+> This fork adapts the codebase to older Android SDK releases and 
+> removes experimental Material3 APIs that were present in upstream.
 
 ---
 
@@ -16,8 +16,8 @@
 The app version lives in **[VERSION_NAME](VERSION_NAME)** and **[VERSION_CODE](VERSION_CODE)** at the repository root:
 
 ```
-VERSION_NAME     → 2026.06.12.06.00    # versionName: YYYY.MM.DD.HH.mm (UTC)
-VERSION_CODE     → 235                 # versionCode: commit count
+VERSION_NAME     → 2026.06.12.16.01    # versionName: YYYY.MM.DD.HH.mm (UTC)
+VERSION_CODE     → 244                 # versionCode: Google-style +1 per release
 ```
 
 `build.gradle.kts` reads these files to set `versionName` (used as-is) and
@@ -60,4 +60,10 @@ This project is a fork of [xororz/local-dream](https://github.com/xororz/local-d
 
 ## License
 
-This project inherits the license of the original [xororz/local-dream](https://github.com/xororz/local-dream) repository.
+This project inherits the license of the original [xororz/local-dream](https://github.com/xororz/local-dream) repository at fork time: CC-BY-NC. See [LICENSE](LICENSE).
+
+---
+
+## User Guide (from upstream xororz/local-dream)
+
+For certain reasons, all guides and documentation from upstream are at  [Guide Site](https://ld-guide.chino.icu).
