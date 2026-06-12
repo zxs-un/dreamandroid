@@ -330,4 +330,6 @@
     <string name="nav_generate">生成</string>
     <string name="nav_upscale">アップスケール</string>
     <string name="nav_browse">ギャラリー</string>
+
+    <string name="stop_generation">生成停止</string>
 </resources>

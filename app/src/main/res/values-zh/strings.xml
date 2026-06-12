@@ -358,4 +358,6 @@
     <string name="nav_generate">生成</string>
     <string name="nav_upscale">高清</string>
     <string name="nav_browse">图库</string>
+
+    <string name="stop_generation">停止生成</string>
 </resources>

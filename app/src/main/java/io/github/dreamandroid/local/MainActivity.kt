@@ -598,6 +598,7 @@ private fun GenerateTopBar(
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
 
     var batchIndex by remember { mutableIntStateOf(0) }
+    var batchGenerationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     var showNoModelWarning by remember { mutableStateOf(false) }
     if (showNoModelWarning) {
@@ -615,29 +616,7 @@ private fun GenerateTopBar(
 
     TopAppBar(
         title = {
-            if (isRunning && progressState != null) {
-                val cur = progressState.step
-                val tot = progressState.totalSteps
-                if (tot > 0) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.5.dp,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "$cur / $tot",
-                            maxLines = 1,
-                            style = MaterialTheme.typography.titleSmall,
-                        )
-                    }
-                } else {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.5.dp,
-                    )
-                }
-            } else if (isModelLoaded && model != null) {
+            if (isModelLoaded && model != null && !isRunning) {
                 Text(
                     text = model.name,
                     maxLines = 1,
@@ -645,25 +624,69 @@ private fun GenerateTopBar(
             }
         },
         navigationIcon = {
-            IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                Icon(Icons.Default.Menu, stringResource(R.string.settings))
-            }
-        },
-        actions = {
             if (isRunning) {
+                // Batch progress on the LEFT (near hamburger icon)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "${batchIndex.coerceAtLeast(1)} / $batchCounts",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                        Icon(Icons.Default.Menu, stringResource(R.string.settings))
+                    }
+                    Spacer(Modifier.width(4.dp))
                     Icon(
                         Icons.Default.Collections,
                         contentDescription = null,
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "${batchIndex.coerceAtLeast(1)} / $batchCounts",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                    Icon(Icons.Default.Menu, stringResource(R.string.settings))
+                }
+            }
+        },
+        actions = {
+            if (isRunning) {
+                // Step progress + stop button on the RIGHT
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (progressState != null && progressState.totalSteps > 0) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.5.dp,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "${(progressState.progress * 100).toInt()}%",
+                            maxLines = 1,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    } else {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .padding(horizontal = 12.dp)
+                                .size(24.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
                     Spacer(Modifier.width(8.dp))
+                    IconButton(onClick = {
+                        batchGenerationJob?.cancel()
+                        batchGenerationJob = null
+                        batchIndex = 0
+                        context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                        BackgroundGenerationService.resetState()
+                    }) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = stringResource(R.string.stop_generation),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
             } else {
                 TextButton(
@@ -671,9 +694,10 @@ private fun GenerateTopBar(
                         if (!isModelLoaded || modelId == null) {
                             showNoModelWarning = true
                         } else {
-                            scope.launch {
-                                val total = batchCounts.coerceAtLeast(1)
-                                for (i in 0 until total) {
+                            batchGenerationJob = scope.launch {
+                                // If seed is set, only generate once regardless of batch count
+                                val actualBatchCount = if (seed.isNotBlank()) 1 else batchCounts.coerceAtLeast(1)
+                                for (i in 0 until actualBatchCount) {
                                     batchIndex = i + 1
                                     val intent = Intent(context, BackgroundGenerationService::class.java).apply {
                                         putExtra("prompt", prompt)
@@ -694,15 +718,21 @@ private fun GenerateTopBar(
                                     // Wait for completion or error
                                     BackgroundGenerationService.generationState
                                         .first { it is BackgroundGenerationService.GenerationState.Complete || it is BackgroundGenerationService.GenerationState.Error }
-                                    delay(200)
-                                    BackgroundGenerationService.clearCompleteState()
+                                    // Wait for service to actually stop before starting next batch
+                                    val waitStartTime = System.currentTimeMillis()
+                                    while (BackgroundGenerationService.isServiceRunning.value) {
+                                        if (System.currentTimeMillis() - waitStartTime > 5000L) break
+                                        delay(100)
+                                    }
+                                    BackgroundGenerationService.resetState()
                                 }
                                 batchIndex = 0
+                                batchGenerationJob = null
                             }
                         }
                     },
                 ) {
-                    Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
+                    Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(stringResource(R.string.generate_image))
                 }
@@ -814,69 +844,65 @@ private fun ImportingModelCard(state: ImportingModelState) {
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
+            Badge(
+                containerColor = if (state.isNpu) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                },
+                contentColor = if (state.isNpu) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onTertiaryContainer
+                },
             ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.5.dp,
+                Text(
+                    text = if (state.isNpu) "NPU" else "CPU",
+                    style = MaterialTheme.typography.labelSmall,
                 )
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = state.modelName,
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = state.progressText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Badge(
-                    containerColor = if (state.isNpu) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    },
-                    contentColor = if (state.isNpu) {
-                        MaterialTheme.colorScheme.onPrimaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onTertiaryContainer
-                    },
-                ) {
-                    Text(
-                        text = if (state.isNpu) "NPU" else "CPU",
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
             }
-
-            if (bytesProgress != null) {
-                LinearProgressIndicator(
-                    progress = { fraction },
-                    modifier = Modifier.fillMaxWidth(),
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = state.modelName,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = "${(fraction * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
+                    text = state.progressText,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
+                if (bytesProgress != null) {
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { fraction },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        text = "${(fraction * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
+            Spacer(Modifier.width(8.dp))
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.5.dp,
+            )
         }
     }
 }
@@ -910,20 +936,27 @@ private fun ModelSelectCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                when {
-                    isActive -> Icons.Default.PlayCircle
-                    isSelected -> Icons.Default.CheckCircle
-                    else -> Icons.Default.RadioButtonUnchecked
+            Badge(
+                containerColor = when {
+                    model.runOnCpu -> MaterialTheme.colorScheme.tertiaryContainer
+                    model.isSdxl -> MaterialTheme.colorScheme.secondaryContainer
+                    else -> MaterialTheme.colorScheme.primaryContainer
                 },
-                contentDescription = null,
-                tint = when {
-                    isActive -> MaterialTheme.colorScheme.primary
-                    isSelected -> MaterialTheme.colorScheme.primary
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                contentColor = when {
+                    model.runOnCpu -> MaterialTheme.colorScheme.onTertiaryContainer
+                    model.isSdxl -> MaterialTheme.colorScheme.onSecondaryContainer
+                    else -> MaterialTheme.colorScheme.onPrimaryContainer
                 },
-                modifier = Modifier.size(32.dp),
-            )
+            ) {
+                Text(
+                    text = when {
+                        model.runOnCpu -> "CPU"
+                        model.isSdxl -> "GPU"
+                        else -> "NPU"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

@@ -377,6 +377,7 @@
     <string name="model_unloaded">Model unloaded</string>
     <string name="model_load_failed">Failed to load model: %s</string>
     <string name="no_model_loaded">No model loaded</string>
+    <string name="stop_generation">Stop generation</string>
     <string name="no_model_loaded_hint">Please load a model in the Models tab first</string>
     <string name="select_model_hint">Tap switch to select a model, then click Load</string>
     <string name="import_model">Import model file</string>

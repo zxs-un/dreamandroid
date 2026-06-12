@@ -358,4 +358,6 @@
     <string name="nav_generate">생성</string>
     <string name="nav_upscale">업스케일</string>
     <string name="nav_browse">갤러리</string>
+
+    <string name="stop_generation">생성 중지</string>
 </resources>
