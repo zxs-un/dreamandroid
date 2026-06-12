@@ -1,7 +1,9 @@
 package io.github.dreamandroid.local.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -20,10 +22,16 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 // import androidx.compose.ui.focus.FocusRequester
 // import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -36,11 +44,53 @@ import io.github.dreamandroid.local.service.BackgroundGenerationService
 import io.github.dreamandroid.local.ui.components.SmoothLinearWavyProgressIndicator
 import io.github.dreamandroid.local.utils.saveImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+private data class TokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
+
+private val generateScreenTokenizeClient: OkHttpClient by lazy {
+    OkHttpClient.Builder()
+        .connectTimeout(2, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.SECONDS)
+        .build()
+}
+
+private suspend fun tokenizePromptForGenerate(text: String): TokenizeResult? = withContext(Dispatchers.IO) {
+    try {
+        val body = JSONObject().apply { put("prompt", text) }
+            .toString()
+            .toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder()
+            .url("http://localhost:8081/tokenize")
+            .post(body)
+            .build()
+        generateScreenTokenizeClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@withContext null
+            val payload = response.body?.string() ?: return@withContext null
+            val json = JSONObject(payload)
+            TokenizeResult(
+                count = json.optInt("count", 0),
+                maxLength = json.optInt("max_length", 77),
+                overflowOffset = json.optInt("overflow_offset", -1),
+            )
+        }
+    } catch (_: Exception) {
+        null
+    }
+}
 
 /**
  * GenerateScreen – image generation with flattened advanced settings.
@@ -74,6 +124,10 @@ fun GenerateScreen(
     onWidthChange: (Int) -> Unit,
     height: Int,
     onHeightChange: (Int) -> Unit,
+    // Batch generation control (from parent)
+    generateTrigger: Int = 0,
+    onBatchIndexChange: (Int) -> Unit = {},
+    onBatchJobChange: (Job?) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -84,6 +138,14 @@ fun GenerateScreen(
     val backendState by BackendService.backendState.collectAsState()
     val serviceState by BackgroundGenerationService.generationState.collectAsState()
     val generationPreferences = remember { GenerationPreferences(context) }
+
+    // ---- Token count / CLIP limit (77 tokens) ----
+    var promptTokenCount by remember { mutableIntStateOf(2) }
+    var negativePromptTokenCount by remember { mutableIntStateOf(2) }
+    var promptTokenMax by remember { mutableIntStateOf(77) }
+    var negativePromptTokenMax by remember { mutableIntStateOf(77) }
+    var promptOverflowOffset by remember { mutableIntStateOf(-1) }
+    var negativePromptOverflowOffset by remember { mutableIntStateOf(-1) }
 
     val view = LocalView.current
     DisposableEffect(view) {
@@ -113,6 +175,22 @@ fun GenerateScreen(
         }
     }
 
+    // ---- Token count / CLIP limit debounced requests ----
+    LaunchedEffect(prompt) {
+        delay(400)
+        val result = tokenizePromptForGenerate(prompt) ?: return@LaunchedEffect
+        promptTokenCount = result.count
+        promptTokenMax = result.maxLength
+        promptOverflowOffset = result.overflowOffset
+    }
+    LaunchedEffect(negativePrompt) {
+        delay(400)
+        val result = tokenizePromptForGenerate(negativePrompt) ?: return@LaunchedEffect
+        negativePromptTokenCount = result.count
+        negativePromptTokenMax = result.maxLength
+        negativePromptOverflowOffset = result.overflowOffset
+    }
+
     fun saveAllFields() {
         if (modelId == null) return
         scope.launch(Dispatchers.IO) {
@@ -134,7 +212,7 @@ fun GenerateScreen(
         }
     }
 
-    // ---- Generation state ----
+    // ---- Generation state (single consumer) ----
     var isRunning by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -143,10 +221,17 @@ fun GenerateScreen(
     var generationStartTime by remember { mutableStateOf<Long?>(null) }
     var returnedSeed by remember { mutableStateOf<Long?>(null) }
 
-    // Track generation service state
+    // Single consumer of generationState: handles UI updates + bitmap saving.
+    // Does NOT reset the service state — the batch loop below owns that.
     LaunchedEffect(serviceState) {
         when (val state = serviceState) {
+            is BackgroundGenerationService.GenerationState.Started -> {
+                // Service has accepted the request; clear previous error
+                errorMessage = null
+            }
             is BackgroundGenerationService.GenerationState.Progress -> {
+                if (generationStartTime == null) generationStartTime = System.currentTimeMillis()
+                isRunning = true
                 progress = state.progress
                 state.intermediateImage?.let { intermediateBitmap = it }
             }
@@ -182,16 +267,137 @@ fun GenerateScreen(
                         )
                     }
                 }
-                BackgroundGenerationService.clearCompleteState()
+                generationStartTime = null
+                // Notify the service that the bitmap has been safely consumed
+                // (saved to history). The batch loop will handle resetState().
+                BackgroundGenerationService.markBitmapConsumed()
             }
             is BackgroundGenerationService.GenerationState.Error -> {
                 isRunning = false
                 errorMessage = state.message
                 intermediateBitmap = null
-                BackgroundGenerationService.resetState()
+                generationStartTime = null
+                // Let the batch loop handle resetState() to avoid races.
             }
             is BackgroundGenerationService.GenerationState.Idle -> {}
         }
+    }
+
+    // ---- Batch generation loop (Zero-Trust) ----
+    // Triggered by GenerateTopBar's "Generate" button via generateTrigger counter.
+    // This is the ONLY place that starts the service and manages the batch lifecycle.
+    // Every interaction is guarded: timeouts, retries, stale-state detection, forced resets.
+    LaunchedEffect(generateTrigger) {
+        if (generateTrigger == 0) return@LaunchedEffect
+        val job = scope.launch {
+            val actualBatchCount = if (seed.isNotBlank()) 1 else batchCounts.coerceAtLeast(1)
+            for (i in 0 until actualBatchCount) {
+                // ---- Zero-Trust: Stale state detection before each iteration ----
+                BackgroundGenerationService.forceResetIfStale()
+
+                // ---- Zero-Trust: Backend health check ----
+                val backendHealthy = withContext(Dispatchers.IO) {
+                    BackgroundGenerationService.checkBackendHealth()
+                }
+                if (!backendHealthy) {
+                    errorMessage = context.getString(R.string.backend_not_healthy)
+                    break
+                }
+
+                onBatchIndexChange(i + 1)
+
+                // ---- Retry loop for this batch item ----
+                var batchItemSucceeded = false
+                for (retryAttempt in 1..BackgroundGenerationService.MAX_RETRIES) {
+                    if (retryAttempt > 1) {
+                        Log.w("GenerateScreen", "Batch item $i retry $retryAttempt")
+                        delay(BackgroundGenerationService.RETRY_DELAY_MS)
+                        BackgroundGenerationService.forceResetIfStale()
+                    }
+
+                    val intent = Intent(context, BackgroundGenerationService::class.java).apply {
+                        putExtra("prompt", prompt)
+                        putExtra("negative_prompt", negativePrompt)
+                        putExtra("steps", steps.roundToInt())
+                        putExtra("cfg", cfg)
+                        seed.toLongOrNull()?.let { putExtra("seed", it) }
+                        putExtra("width", width)
+                        putExtra("height", height)
+                        putExtra("effective_width", width)
+                        putExtra("effective_height", height)
+                        putExtra("denoise_strength", denoiseStrength)
+                        putExtra("use_opencl", useOpenCL)
+                        putExtra("scheduler", scheduler)
+                        putExtra("aspect_ratio", "1:1")
+                    }
+                    context.startForegroundService(intent)
+
+                    // ---- Zero-Trust: Wait with timeout (not indefinite .first {}) ----
+                    val result = withTimeoutOrNull(BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS) {
+                        BackgroundGenerationService.generationState
+                            .first { it is BackgroundGenerationService.GenerationState.Complete ||
+                                     it is BackgroundGenerationService.GenerationState.Error }
+                    }
+
+                    when {
+                        // Timeout — service may have hung, force reset and retry
+                        result == null -> {
+                            Log.w("GenerateScreen", "Batch item $i timed out after ${BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS}ms")
+                            errorMessage = context.getString(R.string.generation_timeout_retry, retryAttempt)
+                            BackgroundGenerationService.resetState()
+                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                            continue // retry
+                        }
+                        // Success
+                        result is BackgroundGenerationService.GenerationState.Complete -> {
+                            batchItemSucceeded = true
+                            errorMessage = null
+                        }
+                        // Backend error — may be recoverable, retry
+                        result is BackgroundGenerationService.GenerationState.Error -> {
+                            Log.w("GenerateScreen", "Batch item $i error: ${result.message}")
+                            errorMessage = result.message
+                            BackgroundGenerationService.resetState()
+                            continue // retry
+                        }
+                    }
+
+                    // ---- Zero-Trust: Confirm bitmap consumed signal took effect ----
+                    val consumed = BackgroundGenerationService.markBitmapConsumed()
+                    if (!consumed) {
+                        Log.w("GenerateScreen", "markBitmapConsumed() did not take effect, retrying")
+                        delay(200)
+                        BackgroundGenerationService.markBitmapConsumed()
+                    }
+
+                    // ---- Zero-Trust: Wait for service to stop with timeout ----
+                    val waitStartTime = System.currentTimeMillis()
+                    while (BackgroundGenerationService.isServiceRunning.value) {
+                        if (System.currentTimeMillis() - waitStartTime > BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS) {
+                            Log.w("GenerateScreen", "Service did not stop within timeout, forcing stop")
+                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                            delay(500)
+                            break
+                        }
+                        delay(100)
+                    }
+
+                    // ---- Zero-Trust: Always force-reset after each batch item ----
+                    BackgroundGenerationService.forceResetIfStale()
+
+                    if (batchItemSucceeded) break // exit retry loop on success
+                }
+
+                // If all retries exhausted for this batch item, stop the entire batch
+                if (!batchItemSucceeded) {
+                    Log.e("GenerateScreen", "Batch item $i failed after all retries, stopping batch")
+                    break
+                }
+            }
+            onBatchIndexChange(0)
+            onBatchJobChange(null)
+        }
+        onBatchJobChange(job)
     }
 
     // ---- UI ----
@@ -203,37 +409,6 @@ fun GenerateScreen(
                 indication = null,
             ) { focusManager.clearFocus() },
     ) {
-        if (model == null) {
-            // No model loaded state
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Warning,
-                        contentDescription = null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                    )
-                    Text(
-                        stringResource(R.string.no_model_loaded),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.no_model_loaded_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    )
-                }
-            }
-            return@Column
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -245,6 +420,84 @@ fun GenerateScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
+            // ---- Batch Count (moved to top, above prompt) ----
+            var batchText by remember(batchCounts) { mutableStateOf(batchCounts.toString()) }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    stringResource(R.string.batch_count, batchCounts),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    FilledIconButton(
+                        onClick = {
+                            val newVal = (batchCounts - 1).coerceAtLeast(1)
+                            onBatchCountsChange(newVal)
+                            batchText = newVal.toString()
+                            saveAllFields()
+                        },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(Icons.Default.Remove, "Decrease")
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    var batchFieldFocused by remember { mutableStateOf(false) }
+                    OutlinedTextField(
+                        value = batchText,
+                        onValueChange = { newText ->
+                            // Allow typing digits (including empty)
+                            if (newText.isEmpty()) {
+                                batchText = newText
+                                return@OutlinedTextField
+                            }
+                            val digits = newText.filter { it.isDigit() }
+                            // While focused, show raw digits; clamp only on commit
+                            batchText = digits
+                            val num = digits.toIntOrNull()
+                            if (num != null && !batchFieldFocused) {
+                                val clamped = num.coerceIn(1, 60)
+                                batchText = clamped.toString()
+                                onBatchCountsChange(clamped)
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier
+                            .width(80.dp)
+                            .onFocusChanged { state ->
+                                batchFieldFocused = state.isFocused
+                                if (!state.isFocused) {
+                                    // On focus lost, clamp the value
+                                    val num = batchText.toIntOrNull() ?: batchCounts
+                                    val clamped = num.coerceIn(1, 60)
+                                    batchText = clamped.toString()
+                                    onBatchCountsChange(clamped)
+                                    saveAllFields()
+                                }
+                            },
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    FilledIconButton(
+                        onClick = {
+                            val newVal = (batchCounts + 1).coerceAtMost(60)
+                            onBatchCountsChange(newVal)
+                            batchText = newVal.toString()
+                            saveAllFields()
+                        },
+                        modifier = Modifier.size(40.dp),
+                    ) {
+                        Icon(Icons.Default.Add, "Increase")
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
             // ---- Prompt Fields ----
             Text(
                 stringResource(R.string.prompt_settings),
@@ -252,11 +505,65 @@ fun GenerateScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            // Grey-out overflow for prompt: characters past the 77-token CLIP limit
+            // are rendered at 38% opacity.
+            val promptOverflowColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            val promptOverflowTransformation = remember(promptOverflowOffset, promptOverflowColor) {
+                VisualTransformation { text ->
+                    if (promptOverflowOffset in 0 until text.length) {
+                        val styled = buildAnnotatedString {
+                            append(text.subSequence(0, promptOverflowOffset))
+                            withStyle(SpanStyle(color = promptOverflowColor)) {
+                                append(text.subSequence(promptOverflowOffset, text.length))
+                            }
+                        }
+                        TransformedText(styled, OffsetMapping.Identity)
+                    } else {
+                        TransformedText(text, OffsetMapping.Identity)
+                    }
+                }
+            }
+
+            val negativePromptOverflowColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+            val negativePromptOverflowTransformation = remember(negativePromptOverflowOffset, negativePromptOverflowColor) {
+                VisualTransformation { text ->
+                    if (negativePromptOverflowOffset in 0 until text.length) {
+                        val styled = buildAnnotatedString {
+                            append(text.subSequence(0, negativePromptOverflowOffset))
+                            withStyle(SpanStyle(color = negativePromptOverflowColor)) {
+                                append(text.subSequence(negativePromptOverflowOffset, text.length))
+                            }
+                        }
+                        TransformedText(styled, OffsetMapping.Identity)
+                    } else {
+                        TransformedText(text, OffsetMapping.Identity)
+                    }
+                }
+            }
+
             OutlinedTextField(
                 value = prompt,
                 onValueChange = onPromptChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.image_prompt)) },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.image_prompt))
+                        if (prompt.isNotEmpty()) {
+                            Spacer(Modifier.width(6.dp))
+                            Text("$promptTokenCount/$promptTokenMax")
+                        }
+                        if (promptOverflowOffset >= 0) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Default.Report,
+                                contentDescription = stringResource(R.string.prompt_token_overflow),
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                },
+                visualTransformation = promptOverflowTransformation,
                 minLines = 2,
                 maxLines = 4,
                 shape = MaterialTheme.shapes.medium,
@@ -266,7 +573,25 @@ fun GenerateScreen(
                 value = negativePrompt,
                 onValueChange = onNegativePromptChange,
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.negative_prompt)) },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(stringResource(R.string.negative_prompt))
+                        if (negativePrompt.isNotEmpty()) {
+                            Spacer(Modifier.width(6.dp))
+                            Text("$negativePromptTokenCount/$negativePromptTokenMax")
+                        }
+                        if (negativePromptOverflowOffset >= 0) {
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                Icons.Default.Report,
+                                contentDescription = stringResource(R.string.prompt_token_overflow),
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
+                },
+                visualTransformation = negativePromptOverflowTransformation,
                 minLines = 1,
                 maxLines = 3,
                 shape = MaterialTheme.shapes.medium,
@@ -375,7 +700,7 @@ fun GenerateScreen(
             }
 
             // Width/Height for CPU models
-            if (model.runOnCpu) {
+            if (model?.runOnCpu == true) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         stringResource(R.string.image_size, width, height),
@@ -434,21 +759,6 @@ fun GenerateScreen(
                 }
             }
 
-            // Batch Count
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    stringResource(R.string.batch_count, batchCounts),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Slider(
-                    value = batchCounts.toFloat(),
-                    onValueChange = { onBatchCountsChange(it.roundToInt()); saveAllFields() },
-                    valueRange = 1f..10f,
-                    steps = 8,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
             // Seed
             OutlinedTextField(
                 value = seed,
@@ -488,8 +798,8 @@ fun GenerateScreen(
                     onSeedChange("")
                     onBatchCountsChange(1)
                     onSchedulerChange("dpm")
-                    onPromptChange(model.defaultPrompt)
-                    onNegativePromptChange(model.defaultNegativePrompt)
+                    onPromptChange(model?.defaultPrompt ?: "")
+                    onNegativePromptChange(model?.defaultNegativePrompt ?: "")
                     onDenoiseStrengthChange(0.6f)
                     saveAllFields()
                 },

@@ -13,6 +13,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,14 +28,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
-import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import io.github.dreamandroid.local.data.*
 import io.github.dreamandroid.local.navigation.BottomTab
 import io.github.dreamandroid.local.service.BackendService
 import io.github.dreamandroid.local.service.BackgroundGenerationService
+import io.github.dreamandroid.local.service.ModelDownloadService
+import io.github.dreamandroid.local.service.UpscaleBackendManager
 import io.github.dreamandroid.local.ui.screens.*
 import io.github.dreamandroid.local.ui.theme.DreamHubTheme
 import io.github.dreamandroid.local.ui.theme.LocalThemeController
@@ -188,10 +191,45 @@ private fun AppContent() {
         )
     }
 
+    // ---- Batch generation state (driven by GenerateScreen, consumed by GenerateTopBar) ----
+    val serviceState by BackgroundGenerationService.generationState.collectAsState()
+    val progressState = serviceState as? BackgroundGenerationService.GenerationState.Progress
+    val isGenerating = progressState != null
+    val progressPercent = if (progressState != null) (progressState.progress * 100).toInt() else 0
+    val hasProgressDetail = progressState != null && progressState.totalSteps > 0
+    var genBatchIndex by remember { mutableIntStateOf(0) }
+    var genBatchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var genGenerateTrigger by remember { mutableIntStateOf(0) }
+
     // ---- Import dialog state ----
     var showCustomModelDialog by remember { mutableStateOf(false) }
     var showCustomNpuModelDialog by remember { mutableStateOf(false) }
-    var importingModel by remember { mutableStateOf<ImportingModelState?>(null) }
+    var importingModels by remember { mutableStateOf<List<ImportingModelState>>(emptyList()) }
+
+    // ---- Upscale model state ----
+    val upscaleBackendState by UpscaleBackendManager.state.collectAsState()
+    val isUpscaleModelLoaded = upscaleBackendState is UpscaleBackendManager.State.Running
+    val selectedUpscalerId = (upscaleBackendState as? UpscaleBackendManager.State.Running)?.upscalerId
+    var upscalerPreferences by remember {
+        mutableStateOf(context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE))
+    }
+    val persistedUpscalerId = remember {
+        upscalerPreferences.getString("upscaler_standalone_selected_upscaler", null)
+    }
+
+    fun addImportingModel(state: ImportingModelState) {
+        importingModels = importingModels + state
+    }
+
+    fun updateImportingModel(modelId: String, update: (ImportingModelState) -> ImportingModelState) {
+        importingModels = importingModels.map { existing ->
+            if (existing.modelId == modelId) update(existing) else existing
+        }
+    }
+
+    fun removeImportingModel(modelId: String) {
+        importingModels = importingModels.filterNot { it.modelId == modelId }
+    }
 
     val msgNpuModelAddedSuccess = stringResource(R.string.npu_model_added_success)
     val msgNpuModelAddFailed = stringResource(R.string.npu_model_add_failed)
@@ -229,6 +267,24 @@ private fun AppContent() {
             selectedModelId = null
             snackbarHostState.showSnackbar(context.getString(R.string.model_unloaded))
         }
+    }
+
+    fun loadUpscaleModel(upscalerId: String) {
+        // Stop diffusion backend if running (both use port 8081)
+        if (backendState is BackendService.BackendState.Running) {
+            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+            context.stopService(Intent(context, BackendService::class.java).apply {
+                action = BackendService.ACTION_STOP
+            })
+        }
+        upscalerPreferences.edit {
+            putString("upscaler_standalone_selected_upscaler", upscalerId)
+        }
+        UpscaleBackendManager.start(context, upscalerId)
+    }
+
+    fun unloadUpscaleModel() {
+        UpscaleBackendManager.stop()
     }
 
     var showNoModelWarning by remember { mutableStateOf(false) }
@@ -276,12 +332,14 @@ private fun AppContent() {
             onModelAdded = { modelName, fileUri, clipSkip, loraFiles ->
                 showCustomModelDialog = false
                 val modelId = modelName.replace(" ", "")
-                importingModel = ImportingModelState(
-                    modelId = modelId,
-                    modelName = modelName,
-                    isNpu = false,
-                    progressText = context.getString(R.string.preparing_model),
-                    byteProgress = null,
+                addImportingModel(
+                    ImportingModelState(
+                        modelId = modelId,
+                        modelName = modelName,
+                        isNpu = false,
+                        progressText = context.getString(R.string.preparing_model),
+                        byteProgress = null,
+                    ),
                 )
                 scope.launch {
                     convertCustomModel(
@@ -290,10 +348,14 @@ private fun AppContent() {
                         fileUri = fileUri,
                         clipSkip = clipSkip,
                         loraFiles = loraFiles,
-                        onProgress = { importingModel = importingModel?.copy(progressText = it) },
+                        onProgress = { progress ->
+                            updateImportingModel(modelId) { existing ->
+                                existing.copy(progressText = progress)
+                            }
+                        },
                         onStart = {},
                         onSuccess = {
-                            importingModel = null
+                            removeImportingModel(modelId)
                             modelRepository.refreshAllModels()
                             modelRefreshVersion++
                             scope.launch {
@@ -301,7 +363,7 @@ private fun AppContent() {
                             }
                         },
                         onError = { error ->
-                            importingModel = null
+                            removeImportingModel(modelId)
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     msgModelConversionFailed.format(error)
@@ -322,27 +384,33 @@ private fun AppContent() {
             onModelAdded = { modelName, zipUri ->
                 showCustomNpuModelDialog = false
                 val modelId = modelName.replace(" ", "")
-                importingModel = ImportingModelState(
-                    modelId = modelId,
-                    modelName = modelName,
-                    isNpu = true,
-                    progressText = context.getString(R.string.preparing_model),
-                    byteProgress = null,
+                addImportingModel(
+                    ImportingModelState(
+                        modelId = modelId,
+                        modelName = modelName,
+                        isNpu = true,
+                        progressText = context.getString(R.string.preparing_model),
+                        byteProgress = null,
+                    ),
                 )
                 scope.launch {
                     extractNpuModel(
                         context = context,
                         modelName = modelName,
                         zipUri = zipUri,
-                        onProgress = { importingModel = importingModel?.copy(progressText = it) },
+                        onProgress = { progress ->
+                            updateImportingModel(modelId) { existing ->
+                                existing.copy(progressText = progress)
+                            }
+                        },
                         onByteProgress = { extracted, total, fraction ->
-                            importingModel = importingModel?.copy(
-                                byteProgress = ExtractByteProgress(extracted, total, fraction)
-                            )
+                            updateImportingModel(modelId) { existing ->
+                                existing.copy(byteProgress = ExtractByteProgress(extracted, total, fraction))
+                            }
                         },
                         onStart = {},
                         onSuccess = {
-                            importingModel = null
+                            removeImportingModel(modelId)
                             modelRepository.refreshAllModels()
                             modelRefreshVersion++
                             scope.launch {
@@ -350,7 +418,7 @@ private fun AppContent() {
                             }
                         },
                         onError = { error ->
-                            importingModel = null
+                            removeImportingModel(modelId)
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     msgNpuModelAddFailed.format(error)
@@ -410,19 +478,25 @@ private fun AppContent() {
                         drawerState = drawerState,
                         modelId = selectedModelId,
                         isModelLoaded = isModelLoaded,
-                        prompt = genPrompt,
-                        negativePrompt = genNegativePrompt,
-                        steps = genSteps,
-                        cfg = genCfg,
-                        seed = genSeed,
-                        width = genWidth,
-                        height = genHeight,
-                        scheduler = genScheduler,
-                        denoiseStrength = genDenoiseStrength,
-                        useOpenCL = genUseOpenCL,
                         batchCounts = genBatchCounts,
+                        batchIndex = genBatchIndex,
+                        isRunning = isGenerating,
+                        progressPercent = progressPercent,
+                        hasProgressDetail = hasProgressDetail,
+                        onGenerate = { genGenerateTrigger++ },
+                        onStop = {
+                            genBatchJob?.cancel()
+                            genBatchJob = null
+                            genBatchIndex = 0
+                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                            BackgroundGenerationService.resetState()
+                        },
                     )
-                    BottomTab.Upscale -> UpscaleTopBar(drawerState = drawerState)
+                    BottomTab.Upscale -> UpscaleTopBar(
+                        drawerState = drawerState,
+                        isUpscaleModelLoaded = isUpscaleModelLoaded,
+                        upscalerId = selectedUpscalerId,
+                    )
                     BottomTab.Browse -> BrowseTopBar(drawerState = drawerState)
                 }
             },
@@ -453,7 +527,11 @@ private fun AppContent() {
                         onLoadModel = { loadModel(it) },
                         modelRepository = modelRepository,
                         refreshVersion = modelRefreshVersion,
-                        importingModel = importingModel,
+                        importingModels = importingModels,
+                        isUpscaleModelLoaded = isUpscaleModelLoaded,
+                        onLoadUpscaleModel = { loadUpscaleModel(it) },
+                        onUnloadUpscaleModel = { unloadUpscaleModel() },
+                        persistedUpscalerId = persistedUpscalerId,
                     )
                     BottomTab.Generate -> TabGenerateScreen(
                         modelId = if (isModelLoaded) selectedModelId else null,
@@ -479,6 +557,9 @@ private fun AppContent() {
                         onWidthChange = { genWidth = it },
                         height = genHeight,
                         onHeightChange = { genHeight = it },
+                        generateTrigger = genGenerateTrigger,
+                        onBatchIndexChange = { genBatchIndex = it },
+                        onBatchJobChange = { genBatchJob = it },
                     )
                     BottomTab.Upscale -> UpscaleScreen()
                     BottomTab.Browse -> BrowseScreen()
@@ -577,28 +658,18 @@ private fun GenerateTopBar(
     drawerState: DrawerState,
     modelId: String?,
     isModelLoaded: Boolean,
-    prompt: String,
-    negativePrompt: String,
-    steps: Float,
-    cfg: Float,
-    seed: String,
-    width: Int,
-    height: Int,
-    scheduler: String,
-    denoiseStrength: Float,
-    useOpenCL: Boolean,
     batchCounts: Int = 1,
+    batchIndex: Int = 0,
+    isRunning: Boolean = false,
+    progressPercent: Int = 0,
+    hasProgressDetail: Boolean = false,
+    onGenerate: () -> Unit = {},
+    onStop: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val serviceState by BackgroundGenerationService.generationState.collectAsState()
-    val progressState = serviceState as? BackgroundGenerationService.GenerationState.Progress
-    val isRunning = progressState != null
     val modelRepository = remember { ModelRepository(context) }
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
-
-    var batchIndex by remember { mutableIntStateOf(0) }
-    var batchGenerationJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
 
     var showNoModelWarning by remember { mutableStateOf(false) }
     if (showNoModelWarning) {
@@ -621,6 +692,22 @@ private fun GenerateTopBar(
                     text = model.name,
                     maxLines = 1,
                 )
+            } else if (!isModelLoaded && !isRunning) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Report,
+                        contentDescription = stringResource(R.string.generate_model_not_loaded),
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(R.string.generate_model_not_loaded),
+                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
             }
         },
         navigationIcon = {
@@ -654,14 +741,14 @@ private fun GenerateTopBar(
             if (isRunning) {
                 // Step progress + stop button on the RIGHT
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (progressState != null && progressState.totalSteps > 0) {
+                    if (hasProgressDetail) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.5.dp,
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "${(progressState.progress * 100).toInt()}%",
+                            text = "${progressPercent}%",
                             maxLines = 1,
                             style = MaterialTheme.typography.titleSmall,
                         )
@@ -674,13 +761,7 @@ private fun GenerateTopBar(
                         )
                     }
                     Spacer(Modifier.width(8.dp))
-                    IconButton(onClick = {
-                        batchGenerationJob?.cancel()
-                        batchGenerationJob = null
-                        batchIndex = 0
-                        context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
-                        BackgroundGenerationService.resetState()
-                    }) {
+                    IconButton(onClick = onStop) {
                         Icon(
                             Icons.Default.Stop,
                             contentDescription = stringResource(R.string.stop_generation),
@@ -694,41 +775,7 @@ private fun GenerateTopBar(
                         if (!isModelLoaded || modelId == null) {
                             showNoModelWarning = true
                         } else {
-                            batchGenerationJob = scope.launch {
-                                // If seed is set, only generate once regardless of batch count
-                                val actualBatchCount = if (seed.isNotBlank()) 1 else batchCounts.coerceAtLeast(1)
-                                for (i in 0 until actualBatchCount) {
-                                    batchIndex = i + 1
-                                    val intent = Intent(context, BackgroundGenerationService::class.java).apply {
-                                        putExtra("prompt", prompt)
-                                        putExtra("negative_prompt", negativePrompt)
-                                        putExtra("steps", steps.roundToInt())
-                                        putExtra("cfg", cfg)
-                                        seed.toLongOrNull()?.let { putExtra("seed", it) }
-                                        putExtra("width", width)
-                                        putExtra("height", height)
-                                        putExtra("effective_width", width)
-                                        putExtra("effective_height", height)
-                                        putExtra("denoise_strength", denoiseStrength)
-                                        putExtra("use_opencl", useOpenCL)
-                                        putExtra("scheduler", scheduler)
-                                        putExtra("aspect_ratio", "1:1")
-                                    }
-                                    context.startForegroundService(intent)
-                                    // Wait for completion or error
-                                    BackgroundGenerationService.generationState
-                                        .first { it is BackgroundGenerationService.GenerationState.Complete || it is BackgroundGenerationService.GenerationState.Error }
-                                    // Wait for service to actually stop before starting next batch
-                                    val waitStartTime = System.currentTimeMillis()
-                                    while (BackgroundGenerationService.isServiceRunning.value) {
-                                        if (System.currentTimeMillis() - waitStartTime > 5000L) break
-                                        delay(100)
-                                    }
-                                    BackgroundGenerationService.resetState()
-                                }
-                                batchIndex = 0
-                                batchGenerationJob = null
-                            }
+                            onGenerate()
                         }
                     },
                 ) {
@@ -757,10 +804,43 @@ private fun BrowseTopBar(drawerState: DrawerState) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun UpscaleTopBar(drawerState: DrawerState) {
+private fun UpscaleTopBar(
+    drawerState: DrawerState,
+    isUpscaleModelLoaded: Boolean,
+    upscalerId: String?,
+) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val upscalerRepository = remember { UpscalerRepository(context) }
+    val upscalerName = remember(upscalerId, upscalerRepository.upscalers) {
+        upscalerId?.let { id -> upscalerRepository.upscalers.find { it.id == id }?.name }
+    }
+
     TopAppBar(
-        title = {},
+        title = {
+            if (isUpscaleModelLoaded && upscalerName != null) {
+                Text(
+                    text = upscalerName,
+                    maxLines = 1,
+                )
+            } else if (!isUpscaleModelLoaded) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Report,
+                        contentDescription = stringResource(R.string.upscale_model_not_loaded),
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = stringResource(R.string.upscale_model_not_loaded),
+                        maxLines = 1,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
+            }
+        },
         navigationIcon = {
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                 Icon(Icons.Default.Menu, stringResource(R.string.settings))
@@ -779,14 +859,26 @@ private fun ModelListTab(
     onLoadModel: (String) -> Unit,
     modelRepository: ModelRepository,
     refreshVersion: Int,
-    importingModel: ImportingModelState? = null,
+    importingModels: List<ImportingModelState> = emptyList(),
+    // Upscale model support
+    isUpscaleModelLoaded: Boolean = false,
+    onLoadUpscaleModel: (String) -> Unit = {},
+    onUnloadUpscaleModel: () -> Unit = {},
+    persistedUpscalerId: String? = null,
 ) {
+    val context = LocalContext.current
+    val upscalerRepository = remember { UpscalerRepository(context) }
+    val downloadState by ModelDownloadService.downloadState.collectAsState()
+
     // Only show custom (imported) models
     val customModels = remember(modelRepository.models, refreshVersion) {
         modelRepository.models.filter { it.isCustom }
     }
 
-    if (customModels.isEmpty() && importingModel == null) {
+    val hasAnyContent = customModels.isNotEmpty() || importingModels.isNotEmpty() ||
+        upscalerRepository.upscalers.any { !it.isDownloaded || it.isDownloaded }
+
+    if (!hasAnyContent) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -814,7 +906,7 @@ private fun ModelListTab(
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            importingModel?.let { imp ->
+            importingModels.forEach { imp ->
                 item(key = "importing_${imp.modelId}") {
                     ImportingModelCard(state = imp)
                 }
@@ -829,6 +921,152 @@ private fun ModelListTab(
                     isSelected = selectedModelId == model.id,
                     isActive = isModelLoaded && selectedModelId == model.id,
                     onSelect = { onSelectModel(model.id) },
+                )
+            }
+
+            // ---- Upscale Models Section ----
+            item(key = "upscale_header") {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                Text(
+                    stringResource(R.string.upscale_models_section),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
+
+            items(upscalerRepository.upscalers, key = { "upscaler_${it.id}" }) { upscaler ->
+                val isThisUpscalerLoaded = isUpscaleModelLoaded &&
+                    UpscaleBackendManager.loadedUpscalerId == upscaler.id
+
+                UpscaleModelCardInline(
+                    upscaler = upscaler,
+                    isLoaded = isThisUpscalerLoaded,
+                    isSelected = persistedUpscalerId == upscaler.id && !isThisUpscalerLoaded,
+                    isDownloading = downloadState is ModelDownloadService.DownloadState.Downloading &&
+                        (downloadState as ModelDownloadService.DownloadState.Downloading).modelId == upscaler.id,
+                    downloadProgress = when (downloadState) {
+                        is ModelDownloadService.DownloadState.Downloading -> {
+                            val ds = downloadState as ModelDownloadService.DownloadState.Downloading
+                            if (ds.modelId == upscaler.id) DownloadProgress(ds.progress, ds.downloadedBytes, ds.totalBytes) else null
+                        }
+                        else -> null
+                    },
+                    onSelect = {
+                        context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE).edit {
+                            putString("upscaler_standalone_selected_upscaler", upscaler.id)
+                        }
+                    },
+                    onLoad = { onLoadUpscaleModel(upscaler.id) },
+                    onUnload = { onUnloadUpscaleModel() },
+                    onDownload = { upscaler.startDownload(context) },
+                )
+
+                // Handle download completion
+                LaunchedEffect(downloadState) {
+                    if (downloadState is ModelDownloadService.DownloadState.Success &&
+                        (downloadState as ModelDownloadService.DownloadState.Success).modelId == upscaler.id) {
+                        upscalerRepository.refreshUpscalerState(upscaler.id)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpscaleModelCardInline(
+    upscaler: UpscalerModel,
+    isLoaded: Boolean,
+    isSelected: Boolean,
+    isDownloading: Boolean,
+    downloadProgress: DownloadProgress?,
+    onSelect: () -> Unit,
+    onLoad: () -> Unit,
+    onUnload: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    Card(
+        onClick = onSelect,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = when {
+                isLoaded -> MaterialTheme.colorScheme.primaryContainer
+                isSelected -> MaterialTheme.colorScheme.secondaryContainer
+                else -> MaterialTheme.colorScheme.surface
+            },
+        ),
+        border = when {
+            isLoaded -> BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+            isSelected -> BorderStroke(1.dp, MaterialTheme.colorScheme.secondary)
+            else -> null
+        },
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = upscaler.name,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = upscaler.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (isLoaded) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.model_loaded),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+
+                when {
+                    isDownloading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    !upscaler.isDownloaded -> {
+                        FilledTonalButton(onClick = onDownload) {
+                            Icon(
+                                imageVector = Icons.Default.Download,
+                                contentDescription = stringResource(R.string.download),
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(stringResource(R.string.download))
+                        }
+                    }
+                    isLoaded -> {
+                        Button(onClick = onUnload) {
+                            Text(stringResource(R.string.unload_upscale_model))
+                        }
+                    }
+                    else -> {
+                        Button(onClick = onLoad) {
+                            Text(stringResource(R.string.load_upscale_model))
+                        }
+                    }
+                }
+            }
+
+            if (isDownloading && downloadProgress != null) {
+                LinearProgressIndicator(
+                    progress = downloadProgress.progress,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 16.dp),
                 )
             }
         }
@@ -854,19 +1092,11 @@ private fun ImportingModelCard(state: ImportingModelState) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Badge(
-                containerColor = if (state.isNpu) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                },
-                contentColor = if (state.isNpu) {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onTertiaryContainer
-                },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Text(
-                    text = if (state.isNpu) "NPU" else "CPU",
+                    text = stringResource(R.string.model_type_generation),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -937,23 +1167,11 @@ private fun ModelSelectCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Badge(
-                containerColor = when {
-                    model.runOnCpu -> MaterialTheme.colorScheme.tertiaryContainer
-                    model.isSdxl -> MaterialTheme.colorScheme.secondaryContainer
-                    else -> MaterialTheme.colorScheme.primaryContainer
-                },
-                contentColor = when {
-                    model.runOnCpu -> MaterialTheme.colorScheme.onTertiaryContainer
-                    model.isSdxl -> MaterialTheme.colorScheme.onSecondaryContainer
-                    else -> MaterialTheme.colorScheme.onPrimaryContainer
-                },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Text(
-                    text = when {
-                        model.runOnCpu -> "CPU"
-                        model.isSdxl -> "GPU"
-                        else -> "NPU"
-                    },
+                    text = stringResource(R.string.model_type_generation),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
@@ -1009,6 +1227,9 @@ private fun TabGenerateScreen(
     onWidthChange: (Int) -> Unit,
     height: Int,
     onHeightChange: (Int) -> Unit,
+    generateTrigger: Int = 0,
+    onBatchIndexChange: (Int) -> Unit = {},
+    onBatchJobChange: (kotlinx.coroutines.Job?) -> Unit = {},
 ) {
     // Reuse the GenerateScreen from the separate file, with all parameters
     GenerateScreen(
@@ -1035,6 +1256,9 @@ private fun TabGenerateScreen(
         onWidthChange = onWidthChange,
         height = height,
         onHeightChange = onHeightChange,
+        generateTrigger = generateTrigger,
+        onBatchIndexChange = onBatchIndexChange,
+        onBatchJobChange = onBatchJobChange,
     )
 }
 

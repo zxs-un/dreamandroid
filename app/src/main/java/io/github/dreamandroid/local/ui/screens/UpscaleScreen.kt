@@ -22,7 +22,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
@@ -39,15 +38,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.core.content.edit
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.size.Size
 import io.github.dreamandroid.local.BuildConfig
 import io.github.dreamandroid.local.R
-import io.github.dreamandroid.local.data.DownloadProgress
-import io.github.dreamandroid.local.data.UpscalerRepository
-import io.github.dreamandroid.local.service.ModelDownloadService
+import io.github.dreamandroid.local.service.UpscaleBackendManager
 import io.github.dreamandroid.local.ui.components.BlockingProgressOverlay
 import io.github.dreamandroid.local.ui.components.SmoothCircularWavyProgressIndicator
 import io.github.dreamandroid.local.ui.theme.Motion
@@ -55,8 +51,6 @@ import io.github.dreamandroid.local.utils.performUpscale
 import io.github.dreamandroid.local.utils.saveImage
 import java.io.File
 import java.io.FileOutputStream
-import java.io.IOException
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -66,16 +60,13 @@ import kotlinx.coroutines.withContext
 fun UpscaleScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val modelId = "upscaler_standalone"
 
     var selectedImageUri by remember { mutableStateOf<Uri?>(null) }
     var selectedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var upscaledImageUri by remember { mutableStateOf<Uri?>(null) }
     var upscaledBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isUpscaling by remember { mutableStateOf(false) }
-    var backendProcess by remember { mutableStateOf<Process?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var backendLogs by remember { mutableStateOf<List<String>>(emptyList()) }
     var currentLog by remember { mutableStateOf("") }
     var tileProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val tileRegex = remember { Regex("""Processed tile (\d+)/(\d+)""") }
@@ -84,19 +75,17 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
     var sharedOffsetX by remember { mutableFloatStateOf(0f) }
     var sharedOffsetY by remember { mutableFloatStateOf(0f) }
 
-    var showUpscalerDialog by remember { mutableStateOf(false) }
-    val upscalerRepository = remember { UpscalerRepository(context) }
-    val upscalerPreferences =
-        remember { context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE) }
+    // Use shared UpscaleBackendManager state
+    val upscaleBackendState by UpscaleBackendManager.state.collectAsState()
+    val isUpscaleBackendRunning = upscaleBackendState is UpscaleBackendManager.State.Running
+    val loadedUpscalerId = (upscaleBackendState as? UpscaleBackendManager.State.Running)?.upscalerId
 
-    // String resources hoisted to composable scope (lint: LocalContextGetResourceValueCall).
+    // String resources hoisted to composable scope.
     val msgImageResolutionTooLarge = stringResource(R.string.image_resolution_too_large)
     val msgFailedToLoadImage = stringResource(R.string.failed_to_load_image)
     val msgImageSaved = stringResource(R.string.image_saved)
-    val msgDownloadDone = stringResource(R.string.download_done)
-    val msgErrorDownloadFailed = stringResource(R.string.error_download_failed)
     val msgUpscaleFailed = stringResource(R.string.upscale_failed)
-    val msgDownloadModelFirst = stringResource(R.string.download_model_first)
+    val msgUpscaleModelNotLoaded = stringResource(R.string.upscale_model_not_loaded)
 
     val imagePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent(),
@@ -140,138 +129,7 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
         }
     }
 
-    fun startUpscalerBackend() {
-        if (backendProcess?.isAlive == true) {
-            Log.d("UpscaleScreen", "Backend already running")
-            return
-        }
-
-        scope.launch(Dispatchers.IO) {
-            try {
-                val runtimeDir = prepareRuntimeDir(context)
-                val nativeDir = context.applicationInfo.nativeLibraryDir
-                val executableFile = File(nativeDir, "libstable_diffusion_core.so")
-
-                if (!executableFile.exists()) {
-                    withContext(Dispatchers.Main) {
-                        errorMessage = "Executable file not found: ${executableFile.absolutePath}"
-                    }
-                    return@launch
-                }
-
-                val listenOnAll = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-                    .getBoolean("listen_on_all_addresses", false)
-                var command = listOf(
-                    executableFile.absolutePath,
-                    "--upscaler_mode",
-                    "--lib_dir",
-                    runtimeDir.absolutePath,
-                    "--port",
-                    "8081",
-                )
-                if (listenOnAll) {
-                    command = command + "--listen_all"
-                }
-
-                val env = mutableMapOf<String, String>()
-                val systemLibPaths = mutableListOf(
-                    runtimeDir.absolutePath,
-                    "/system/lib64",
-                    "/vendor/lib64",
-                    "/vendor/lib64/egl",
-                )
-
-                try {
-                    val maliSymlink = File("/system/vendor/lib64/egl/libGLES_mali.so")
-                    if (maliSymlink.exists()) {
-                        val realPath = maliSymlink.canonicalPath
-                        val soc = realPath.split("/").getOrNull(realPath.split("/").size - 2)
-                        if (soc != null) {
-                            val socPaths = listOf(
-                                "/vendor/lib64/$soc",
-                                "/vendor/lib64/egl/$soc",
-                            )
-                            socPaths.forEach { path ->
-                                if (!systemLibPaths.contains(path)) {
-                                    systemLibPaths.add(path)
-                                }
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w("UpscaleScreen", "Failed to resolve Mali paths: ${e.message}")
-                }
-
-                env["LD_LIBRARY_PATH"] = systemLibPaths.joinToString(":")
-                env["DSP_LIBRARY_PATH"] = runtimeDir.absolutePath
-
-                Log.d("UpscaleScreen", "COMMAND: ${command.joinToString(" ")}")
-                Log.d("UpscaleScreen", "LD_LIBRARY_PATH=${env["LD_LIBRARY_PATH"]}")
-
-                val processBuilder = ProcessBuilder(command).apply {
-                    directory(File(nativeDir))
-                    redirectErrorStream(true)
-                    environment().putAll(env)
-                }
-
-                backendProcess = processBuilder.start()
-
-                Thread {
-                    try {
-                        backendProcess?.inputStream?.bufferedReader()?.use { reader ->
-                            var line: String?
-                            while (reader.readLine().also { line = it } != null) {
-                                val logLine = line!!
-                                Log.i("UpscaleBackend", "Backend: $logLine")
-                                scope.launch(Dispatchers.Main) {
-                                    backendLogs = (backendLogs + logLine).takeLast(50)
-                                    if (isUpscaling && logLine.startsWith("Process")) {
-                                        currentLog = logLine
-                                        tileRegex.find(logLine)?.let { match ->
-                                            val current = match.groupValues[1].toIntOrNull()
-                                            val total = match.groupValues[2].toIntOrNull()
-                                            if (current != null && total != null && total > 0) {
-                                                tileProgress = current to total
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        val exitCode = backendProcess?.waitFor()
-                        Log.i("UpscaleBackend", "Backend process exited with code: $exitCode")
-                    } catch (e: Exception) {
-                        Log.e("UpscaleBackend", "Monitor error", e)
-                    }
-                }.apply {
-                    isDaemon = true
-                    start()
-                }
-            } catch (e: Exception) {
-                Log.e("UpscaleScreen", "Failed to start backend", e)
-                withContext(Dispatchers.Main) {
-                    errorMessage = "Failed to start backend: ${e.message}"
-                }
-            }
-        }
-    }
-
-    fun stopUpscalerBackend() {
-        backendProcess?.let { proc ->
-            try {
-                proc.destroy()
-                if (!proc.waitFor(5, TimeUnit.SECONDS)) {
-                    proc.destroyForcibly()
-                }
-                Log.i("UpscaleScreen", "Backend stopped")
-            } catch (e: Exception) {
-                Log.e("UpscaleScreen", "Failed to stop backend", e)
-            } finally {
-                backendProcess = null
-            }
-        }
-    }
-
+    // Clean temp files on entry
     LaunchedEffect(Unit) {
         launch(Dispatchers.IO) {
             try {
@@ -285,13 +143,6 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
             } catch (e: Exception) {
                 Log.e("UpscaleScreen", "Failed to clean temp files", e)
             }
-        }
-        startUpscalerBackend()
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            stopUpscalerBackend()
         }
     }
 
@@ -411,7 +262,7 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
-                val fabEnabled = selectedBitmap != null && !isUpscaling
+                val fabEnabled = selectedBitmap != null && !isUpscaling && isUpscaleBackendRunning && loadedUpscalerId != null
                 val fabContainerColor by animateColorAsState(
                     targetValue = if (fabEnabled) {
                         MaterialTheme.colorScheme.primaryContainer
@@ -433,7 +284,45 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
                 FloatingActionButton(
                     onClick = {
                         if (fabEnabled) {
-                            showUpscalerDialog = true
+                            val upscalerId = loadedUpscalerId ?: return@FloatingActionButton
+                            tileProgress = null
+                            currentLog = ""
+                            isUpscaling = true
+                            scope.launch {
+                                try {
+                                    val resultBitmap = performUpscale(
+                                        context = context,
+                                        bitmap = selectedBitmap!!,
+                                        upscalerId = upscalerId,
+                                    )
+                                    upscaledBitmap = resultBitmap
+
+                                    resultBitmap.let { bmp ->
+                                        withContext(Dispatchers.IO) {
+                                            try {
+                                                val tempFile = File(
+                                                    context.cacheDir,
+                                                    "upscaled_temp_${System.currentTimeMillis()}.jpg",
+                                                )
+                                                FileOutputStream(tempFile).use { out ->
+                                                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
+                                                }
+                                                upscaledImageUri = Uri.fromFile(tempFile)
+                                            } catch (e: Exception) {
+                                                Log.e("UpscaleScreen", "Failed to save temp file", e)
+                                            }
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        msgUpscaleFailed.format(e.message ?: "Unknown error"),
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                } finally {
+                                    isUpscaling = false
+                                }
+                            }
                         }
                     },
                     containerColor = fabContainerColor,
@@ -598,189 +487,6 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
             }
     }
 
-    if (showUpscalerDialog) {
-        var tempSelectedUpscalerId by remember {
-            mutableStateOf(upscalerPreferences.getString("${modelId}_selected_upscaler", null))
-        }
-        var downloadingUpscalerId by remember { mutableStateOf<String?>(null) }
-        var downloadProgress by remember { mutableStateOf<DownloadProgress?>(null) }
-
-        val downloadState by ModelDownloadService.downloadState.collectAsState()
-
-        LaunchedEffect(downloadState) {
-            when (val state = downloadState) {
-                is ModelDownloadService.DownloadState.Downloading -> {
-                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
-                    if (upscaler != null) {
-                        downloadingUpscalerId = upscaler.id
-                        downloadProgress = DownloadProgress(
-                            progress = state.progress,
-                            downloadedBytes = state.downloadedBytes,
-                            totalBytes = state.totalBytes,
-                        )
-                    }
-                }
-
-                is ModelDownloadService.DownloadState.Success -> {
-                    upscalerRepository.refreshUpscalerState(state.modelId)
-                    downloadingUpscalerId = null
-                    downloadProgress = null
-                    Toast.makeText(
-                        context,
-                        msgDownloadDone,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-
-                is ModelDownloadService.DownloadState.Error -> {
-                    downloadingUpscalerId = null
-                    downloadProgress = null
-                    Toast.makeText(
-                        context,
-                        msgErrorDownloadFailed.format(state.message),
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-
-                is ModelDownloadService.DownloadState.Extracting -> {
-                    val upscaler = upscalerRepository.upscalers.find { it.id == state.modelId }
-                    if (upscaler != null) {
-                        downloadingUpscalerId = upscaler.id
-                        downloadProgress = null // Indeterminate progress during extraction
-                    }
-                }
-
-                is ModelDownloadService.DownloadState.Idle -> {
-                    if (downloadingUpscalerId != null && downloadProgress == null) {
-                        downloadingUpscalerId = null
-                    }
-                }
-            }
-        }
-
-        UpscalerSelectDialog(
-            upscalers = upscalerRepository.upscalers,
-            selectedUpscalerId = tempSelectedUpscalerId,
-            downloadingUpscalerId = downloadingUpscalerId,
-            downloadProgress = downloadProgress,
-            onDismiss = { showUpscalerDialog = false },
-            onSelectUpscaler = { upscalerId ->
-                tempSelectedUpscalerId = upscalerId
-            },
-            onConfirm = {
-                val selectedUpscaler =
-                    upscalerRepository.upscalers.find { it.id == tempSelectedUpscalerId }
-                if (selectedUpscaler != null && selectedUpscaler.isDownloaded) {
-                    upscalerPreferences.edit {
-                        putString("${modelId}_selected_upscaler", selectedUpscaler.id)
-                    }
-                    showUpscalerDialog = false
-
-                    selectedBitmap?.let { bitmap ->
-                        tileProgress = null
-                        currentLog = ""
-                        isUpscaling = true
-                        scope.launch {
-                            try {
-                                val resultBitmap = performUpscale(
-                                    context = context,
-                                    bitmap = bitmap,
-                                    upscalerId = selectedUpscaler.id,
-                                )
-                                upscaledBitmap = resultBitmap
-
-                                resultBitmap.let { bmp ->
-                                    withContext(Dispatchers.IO) {
-                                        try {
-                                            val tempFile = File(
-                                                context.cacheDir,
-                                                "upscaled_temp_${System.currentTimeMillis()}.jpg",
-                                            )
-                                            FileOutputStream(tempFile).use { out ->
-                                                bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
-                                            }
-                                            upscaledImageUri = Uri.fromFile(tempFile)
-                                        } catch (e: Exception) {
-                                            Log.e("UpscaleScreen", "Failed to save temp file", e)
-                                        }
-                                    }
-                                }
-                            } catch (e: Exception) {
-                                Toast.makeText(
-                                    context,
-                                    msgUpscaleFailed.format(e.message ?: "Unknown error"),
-                                    Toast.LENGTH_SHORT,
-                                ).show()
-                            } finally {
-                                isUpscaling = false
-                            }
-                        }
-                    }
-                } else if (selectedUpscaler != null) {
-                    Toast.makeText(
-                        context,
-                        msgDownloadModelFirst,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                }
-            },
-            onDownload = { upscaler ->
-                downloadingUpscalerId = upscaler.id
-                downloadProgress = null
-                upscaler.startDownload(context)
-            },
-        )
-    }
-}
-
-// sealed class BackendState {
-//     object Idle : BackendState()
-//     object Starting : BackendState()
-//     object Running : BackendState()
-//     data class Error(val message: String) : BackendState()
-// }
-
-fun prepareRuntimeDir(context: Context): File {
-    val runtimeDir = File(context.filesDir, "runtime_libs").apply {
-        if (!exists()) {
-            mkdirs()
-        }
-    }
-
-    try {
-        val qnnlibsAssets = context.assets.list("qnnlibs")
-        qnnlibsAssets?.forEach { fileName ->
-            val targetLib = File(runtimeDir, fileName)
-
-            val needsCopy = !targetLib.exists() ||
-                run {
-                    val assetInputStream = context.assets.open("qnnlibs/$fileName")
-                    val assetSize = assetInputStream.use { it.available().toLong() }
-                    targetLib.length() != assetSize
-                }
-
-            if (needsCopy) {
-                val assetInputStream = context.assets.open("qnnlibs/$fileName")
-                assetInputStream.use { input ->
-                    targetLib.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                Log.d("UpscaleScreen", "Copied $fileName from assets to runtime directory")
-            }
-
-            targetLib.setReadable(true, true)
-            targetLib.setExecutable(true, true)
-        }
-    } catch (e: IOException) {
-        Log.e("UpscaleScreen", "Failed to prepare QNN libraries from assets", e)
-        throw RuntimeException("Failed to prepare QNN libraries from assets", e)
-    }
-
-    runtimeDir.setReadable(true, true)
-    runtimeDir.setExecutable(true, true)
-
-    return runtimeDir
 }
 
 @Composable

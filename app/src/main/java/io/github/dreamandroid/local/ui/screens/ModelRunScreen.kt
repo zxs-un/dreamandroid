@@ -221,6 +221,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -2540,6 +2541,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     count = promptTokenCount,
                                     max = promptTokenMax,
                                     showCount = prompt.isNotEmpty(),
+                                    overflow = promptOverflowOffset >= 0,
                                 )
                             },
                             suggestions = promptSuggestions,
@@ -2589,6 +2591,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                     count = negativePromptTokenCount,
                                     max = negativePromptTokenMax,
                                     showCount = negativePrompt.isNotEmpty(),
+                                    overflow = negativePromptOverflowOffset >= 0,
                                 )
                             },
                             suggestions = negativePromptSuggestions,
@@ -2663,14 +2666,13 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
 
                                 batchGenerationJob = coroutineScope.launch {
                                     for (i in 0 until actualBatchCount) {
+                                        // ---- Zero-Trust: Stale state detection ----
+                                        BackgroundGenerationService.forceResetIfStale()
+
                                         currentBatchIndex = i + 1
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "preparing batch $i",
-                                        )
+                                        Log.d("ModelRunScreen", "preparing batch $i")
 
                                         // Update generationParamsTmp to reflect current parameters
-                                        // This allows parameters to be changed during batch execution
                                         generationParamsTmp = GenerationParameters(
                                             steps = steps.roundToInt(),
                                             cfg = cfg,
@@ -2686,97 +2688,112 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                                             scheduler = scheduler,
                                         )
 
-                                        val batchIntent = Intent(
-                                            context,
-                                            BackgroundGenerationService::class.java,
-                                        ).apply {
-                                            putExtra("prompt", prompt)
-                                            putExtra(
-                                                "negative_prompt",
-                                                negativePrompt,
-                                            )
-                                            putExtra("steps", steps.roundToInt())
-                                            putExtra("cfg", cfg)
-                                            seed.toLongOrNull()
-                                                ?.let { putExtra("seed", it) }
-                                            putExtra("width", currentWidth)
-                                            putExtra("height", currentHeight)
-                                            // Backend now crops progress previews to the
-                                            // visible target rectangle, so the service must
-                                            // decode each preview with the effective dims
-                                            // (target_w/h), not the 1024 canvas size.
-                                            putExtra("effective_width", effectiveWidth)
-                                            putExtra("effective_height", effectiveHeight)
-                                            putExtra(
-                                                "denoise_strength",
-                                                denoiseStrength,
-                                            )
-                                            putExtra("use_opencl", useOpenCL)
-                                            putExtra("scheduler", scheduler)
-                                            putExtra("aspect_ratio", aspectRatio)
-                                            putExtra("batch_index", i)
-                                            if (selectedImageUri != null && base64EncodeDone) {
-                                                putExtra("has_image", true)
-                                                if (isInpaintMode && maskBitmap != null) {
-                                                    putExtra("has_mask", true)
+                                        // ---- Retry loop for this batch item ----
+                                        var batchItemSucceeded = false
+                                        for (retryAttempt in 1..BackgroundGenerationService.MAX_RETRIES) {
+                                            if (retryAttempt > 1) {
+                                                Log.w("ModelRunScreen", "Batch $i retry $retryAttempt")
+                                                delay(BackgroundGenerationService.RETRY_DELAY_MS)
+                                                BackgroundGenerationService.forceResetIfStale()
+                                            }
+
+                                            val batchIntent = Intent(
+                                                context,
+                                                BackgroundGenerationService::class.java,
+                                            ).apply {
+                                                putExtra("prompt", prompt)
+                                                putExtra("negative_prompt", negativePrompt)
+                                                putExtra("steps", steps.roundToInt())
+                                                putExtra("cfg", cfg)
+                                                seed.toLongOrNull()?.let { putExtra("seed", it) }
+                                                putExtra("width", currentWidth)
+                                                putExtra("height", currentHeight)
+                                                putExtra("effective_width", effectiveWidth)
+                                                putExtra("effective_height", effectiveHeight)
+                                                putExtra("denoise_strength", denoiseStrength)
+                                                putExtra("use_opencl", useOpenCL)
+                                                putExtra("scheduler", scheduler)
+                                                putExtra("aspect_ratio", aspectRatio)
+                                                putExtra("batch_index", i)
+                                                if (selectedImageUri != null && base64EncodeDone) {
+                                                    putExtra("has_image", true)
+                                                    if (isInpaintMode && maskBitmap != null) {
+                                                        putExtra("has_mask", true)
+                                                    }
                                                 }
                                             }
-                                        }
 
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "start service - batch $i",
-                                        )
+                                            Log.d("ModelRunScreen", "start service - batch $i")
+                                            context.startForegroundService(batchIntent)
+                                            Log.d("ModelRunScreen", "start service sent - batch $i")
 
-                                        context.startForegroundService(batchIntent)
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "start service sent - batch $i",
-                                        )
-
-                                        BackgroundGenerationService.generationState
-                                            .first { state ->
-                                                state is GenerationState.Complete ||
-                                                    state is GenerationState.Error
+                                            // ---- Zero-Trust: Wait with timeout ----
+                                            val result = withTimeoutOrNull(
+                                                BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS
+                                            ) {
+                                                BackgroundGenerationService.generationState
+                                                    .first { state ->
+                                                        state is GenerationState.Complete ||
+                                                            state is GenerationState.Error
+                                                    }
                                             }
 
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "batch $i completed, waiting for service to stop",
-                                        )
-
-                                        // Wait for service to actually stop
-                                        val waitStartTime =
-                                            System.currentTimeMillis()
-                                        val timeoutMs = 5000L
-                                        while (BackgroundGenerationService.isServiceRunning.value) {
-                                            if (System.currentTimeMillis() - waitStartTime > timeoutMs) {
-                                                Log.w(
-                                                    "ModelRunScreen",
-                                                    "Timeout waiting for service to stop",
-                                                )
-                                                break
+                                            when {
+                                                result == null -> {
+                                                    Log.w("ModelRunScreen", "Batch $i timed out")
+                                                    BackgroundGenerationService.resetState()
+                                                    context.sendBroadcast(
+                                                        Intent(BackgroundGenerationService.ACTION_STOP)
+                                                    )
+                                                    continue // retry
+                                                }
+                                                result is GenerationState.Complete -> {
+                                                    batchItemSucceeded = true
+                                                }
+                                                result is GenerationState.Error -> {
+                                                    Log.w("ModelRunScreen", "Batch $i error: ${result.message}")
+                                                    BackgroundGenerationService.resetState()
+                                                    continue // retry
+                                                }
                                             }
-                                            delay(100)
+
+                                            Log.d("ModelRunScreen", "batch $i completed")
+
+                                            // ---- Zero-Trust: Confirm bitmap consumed ----
+                                            BackgroundGenerationService.markBitmapConsumed()
+
+                                            // ---- Zero-Trust: Wait for service stop with timeout ----
+                                            val waitStartTime = System.currentTimeMillis()
+                                            while (BackgroundGenerationService.isServiceRunning.value) {
+                                                if (System.currentTimeMillis() - waitStartTime >
+                                                        BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS
+                                                ) {
+                                                    Log.w("ModelRunScreen", "Service stop timeout")
+                                                    context.sendBroadcast(
+                                                        Intent(BackgroundGenerationService.ACTION_STOP)
+                                                    )
+                                                    delay(500)
+                                                    break
+                                                }
+                                                delay(100)
+                                            }
+
+                                            Log.d("ModelRunScreen", "service stopped")
+
+                                            // ---- Zero-Trust: Force-reset after each iteration ----
+                                            BackgroundGenerationService.forceResetIfStale()
+
+                                            if (batchItemSucceeded) break
                                         }
 
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "service stopped, wait time: ${System.currentTimeMillis() - waitStartTime}ms",
-                                        )
-
-                                        BackgroundGenerationService.resetState()
-                                        Log.d(
-                                            "ModelRunScreen",
-                                            "service state reset, ready for next batch",
-                                        )
+                                        if (!batchItemSucceeded) {
+                                            Log.e("ModelRunScreen", "Batch $i failed after all retries")
+                                            break
+                                        }
                                     }
                                     currentBatchIndex = 0
                                     isRunning = false
-                                    Log.d(
-                                        "ModelRunScreen",
-                                        "all batches completed, isRunning set to false",
-                                    )
+                                    Log.d("ModelRunScreen", "all batches completed")
                                 }
                             },
                             enabled = serviceState !is GenerationState.Progress && !isRunning && !isUpscaling,
@@ -4784,12 +4801,21 @@ fun UpscalerModelCard(
 }
 
 @Composable
-private fun PromptCountLabel(label: String, count: Int, max: Int, showCount: Boolean) {
+private fun PromptCountLabel(label: String, count: Int, max: Int, showCount: Boolean, overflow: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label)
         if (showCount) {
             Spacer(Modifier.width(6.dp))
             Text("$count/$max")
+        }
+        if (overflow) {
+            Spacer(Modifier.width(4.dp))
+            Icon(
+                Icons.Default.Report,
+                contentDescription = stringResource(R.string.prompt_token_overflow),
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }

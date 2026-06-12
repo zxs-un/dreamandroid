@@ -1683,19 +1683,11 @@ fun ModelCard(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp),
-                containerColor = if (model.runOnCpu) {
-                    MaterialTheme.colorScheme.tertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.primaryContainer
-                },
-                contentColor = if (model.runOnCpu) {
-                    MaterialTheme.colorScheme.onTertiaryContainer
-                } else {
-                    MaterialTheme.colorScheme.onPrimaryContainer
-                },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
             ) {
                 Text(
-                    text = if (model.runOnCpu) "CPU" else "NPU",
+                    text = stringResource(R.string.model_type_generation),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }

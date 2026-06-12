@@ -225,6 +225,9 @@
     <string name="error_download_failed">Download failed: %s</string>
     <string name="error_request_failed">Request failed: %s</string>
     <string name="unknown_error">unknown error</string>
+    <string name="backend_not_healthy">Backend server is not responding. Please check if the model is loaded.</string>
+    <string name="generation_timeout_retry">Generation timed out (attempt %d). Retrying…</string>
+    <string name="prompt_token_overflow">Prompt exceeds the 77-token CLIP limit</string>
 
     <!-- Info Messages -->
     <string name="image_saved">Image saved to gallery</string>
@@ -377,11 +380,18 @@
     <string name="model_unloaded">Model unloaded</string>
     <string name="model_load_failed">Failed to load model: %s</string>
     <string name="no_model_loaded">No model loaded</string>
+    <string name="generate_model_not_loaded">Generate model not loaded</string>
+    <string name="upscale_model_not_loaded">Upscale model not loaded</string>
     <string name="stop_generation">Stop generation</string>
     <string name="no_model_loaded_hint">Please load a model in the Models tab first</string>
+    <string name="load_upscale_model">Load Upscale Model</string>
+    <string name="unload_upscale_model">Unload Upscale Model</string>
+    <string name="upscale_models_section">Upscale Models</string>
     <string name="select_model_hint">Tap switch to select a model, then click Load</string>
     <string name="import_model">Import model file</string>
     <string name="import_npu_model">Import NPU model zip</string>
+    <string name="model_type_generation">Generation</string>
+    <string name="model_type_upscale">Upscale</string>
 
     <!-- Browse Screen -->
     <string name="no_generated_images">No generated images yet</string>

@@ -34,6 +34,13 @@ class BackgroundGenerationService : Service() {
         private const val NOTIFICATION_ID = 1
         const val ACTION_STOP = "stop_generation"
 
+        // Retry configuration
+        const val MAX_RETRIES = 3
+        const val RETRY_DELAY_MS = 1500L
+        const val SERVICE_WAIT_TIMEOUT_MS = 8000L
+        const val BITMAP_CONSUMED_TIMEOUT_MS = 5000L
+        const val BACKEND_HEALTH_CHECK_TIMEOUT_MS = 3000L
+
         private val _generationState = MutableStateFlow<GenerationState>(GenerationState.Idle)
         val generationState: StateFlow<GenerationState> = _generationState
 
@@ -42,9 +49,22 @@ class BackgroundGenerationService : Service() {
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning: StateFlow<Boolean> = _isServiceRunning
 
+        /** Reset all state to a clean baseline. Atomic — always succeeds. */
         fun resetState() {
             _generationState.value = GenerationState.Idle
             _bitmapConsumed.value = false
+        }
+
+        /**
+         * Force-reset state if it appears stuck (e.g. stale Progress without activity).
+         * Used by the batch loop as a safety net before starting a new iteration.
+         */
+        fun forceResetIfStale() {
+            val current = _generationState.value
+            if (current !is GenerationState.Idle) {
+                Log.w("BgGenService", "Force-resetting stale state: $current")
+                resetState()
+            }
         }
 
         fun clearCompleteState() {
@@ -53,13 +73,44 @@ class BackgroundGenerationService : Service() {
             }
         }
 
-        fun markBitmapConsumed() {
+        /**
+         * Mark the bitmap as consumed with confirmation.
+         * Returns true if the flag was successfully flipped.
+         */
+        fun markBitmapConsumed(): Boolean {
             _bitmapConsumed.value = true
+            // Confirm it actually took effect
+            return _bitmapConsumed.value
+        }
+
+        /**
+         * Verify that the backend server is reachable.
+         * Returns true if the health check endpoint responds.
+         */
+        suspend fun checkBackendHealth(): Boolean = withContext(Dispatchers.IO) {
+            try {
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .readTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .build()
+                val request = Request.Builder()
+                    .url("http://localhost:8081/health")
+                    .get()
+                    .build()
+                client.newCall(request).execute().use { response ->
+                    response.isSuccessful
+                }
+            } catch (e: Exception) {
+                Log.w("BgGenService", "Backend health check failed: ${e.message}")
+                false
+            }
         }
     }
 
     sealed class GenerationState {
         object Idle : GenerationState()
+        /** Service has accepted the request and is preparing to send to backend. */
+        object Started : GenerationState()
         data class Progress(
             val progress: Float,
             val intermediateImage: Bitmap? = null,
@@ -157,10 +208,14 @@ class BackgroundGenerationService : Service() {
 
         Log.d("GenerationService", "params: steps=$steps, cfg=$cfg, seed=$seed")
 
+        // Zero-trust: always reset to a clean baseline before starting
         if (_generationState.value is GenerationState.Complete) {
             updateState(GenerationState.Idle)
         }
         _bitmapConsumed.value = false
+
+        // Signal that the service has accepted the request (before launching async work)
+        updateState(GenerationState.Started)
 
         serviceScope.launch {
             Log.d("GenerationService", "start generation")
@@ -187,6 +242,68 @@ class BackgroundGenerationService : Service() {
     }
 
     private suspend fun runGeneration(
+        prompt: String,
+        negativePrompt: String,
+        steps: Int,
+        cfg: Float,
+        seed: Long?,
+        width: Int,
+        height: Int,
+        effectiveWidth: Int,
+        effectiveHeight: Int,
+        image: String?,
+        mask: String?,
+        denoiseStrength: Float,
+        useOpenCL: Boolean,
+        scheduler: String,
+        aspectRatio: String,
+    ) = withContext(Dispatchers.IO) {
+        var lastException: Exception? = null
+
+        for (attempt in 1..MAX_RETRIES) {
+            if (!isActive) break
+            if (attempt > 1) {
+                Log.w("BgGenService", "Retry attempt $attempt/$MAX_RETRIES after ${RETRY_DELAY_MS}ms")
+                updateState(GenerationState.Progress(0f)) // Signal retry to UI
+                delay(RETRY_DELAY_MS)
+            }
+
+            try {
+                executeGeneration(
+                    prompt, negativePrompt, steps, cfg, seed,
+                    width, height, effectiveWidth, effectiveHeight,
+                    image, mask, denoiseStrength, useOpenCL,
+                    scheduler, aspectRatio,
+                )
+                // Success — exit retry loop
+                return@withContext
+            } catch (e: Exception) {
+                lastException = e
+                Log.e("BgGenService", "Generation attempt $attempt failed: ${e.message}", e)
+
+                // Don't retry on non-recoverable errors (e.g. bad prompt, invalid params)
+                if (e is IOException && (e.message?.contains("request failed") == true ||
+                        e.message?.contains("no image data") == true)) {
+                    Log.w("BgGenService", "Non-recoverable error, not retrying")
+                    break
+                }
+            }
+        }
+
+        // All retries exhausted
+        updateState(
+            GenerationState.Error(
+                lastException?.message
+                    ?: this@BackgroundGenerationService.getString(R.string.unknown_error),
+            ),
+        )
+        stopSelf()
+    }
+
+    /**
+     * Execute a single generation attempt. Throws on failure so the retry loop can catch it.
+     */
+    private suspend fun executeGeneration(
         prompt: String,
         negativePrompt: String,
         steps: Int,
@@ -401,12 +518,11 @@ class BackgroundGenerationService : Service() {
 
                                     // Wait for UI to consume the bitmap with timeout
                                     val waitStartTime = System.currentTimeMillis()
-                                    val timeoutMs = 5000L // 5 seconds timeout
                                     while (!_bitmapConsumed.value && isActive) {
-                                        if (System.currentTimeMillis() - waitStartTime > timeoutMs) {
+                                        if (System.currentTimeMillis() - waitStartTime > BITMAP_CONSUMED_TIMEOUT_MS) {
                                             Log.w(
                                                 "BgGenService",
-                                                "Timeout waiting for bitmap consumption",
+                                                "Timeout waiting for bitmap consumption after ${BITMAP_CONSUMED_TIMEOUT_MS}ms",
                                             )
                                             break
                                         }
@@ -434,14 +550,6 @@ class BackgroundGenerationService : Service() {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.e("GenerationService", "generation error", e)
-            updateState(
-                GenerationState.Error(
-                    e.message ?: this@BackgroundGenerationService.getString(R.string.unknown_error),
-                ),
-            )
-            stopSelf()
         }
     }
 
@@ -504,9 +612,9 @@ class BackgroundGenerationService : Service() {
         super.onDestroy()
         serviceScope.cancel()
 
-        if (_generationState.value is GenerationState.Error) {
-            resetState()
-        }
+        // Zero-trust: force-reset any non-Idle state on destroy.
+        // This ensures the next service start always begins from a clean baseline.
+        forceResetIfStale()
 
         _isServiceRunning.value = false
         Log.d("GenerationService", "service destroyed, isServiceRunning set to false")

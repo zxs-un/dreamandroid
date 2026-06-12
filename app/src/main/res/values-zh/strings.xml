@@ -216,6 +216,9 @@
     <string name="error_download_failed">下载失败: %s</string>
     <string name="error_request_failed">请求失败: %s</string>
     <string name="unknown_error">未知错误</string>
+    <string name="backend_not_healthy">后端服务无响应，请确认模型已加载。</string>
+    <string name="generation_timeout_retry">生成超时（第%d次尝试）。正在重试…</string>
+    <string name="prompt_token_overflow">提示词超出 77 token CLIP 限制</string>
 
     <!-- Info Messages -->
     <string name="image_saved">图片已保存到相册</string>
@@ -359,5 +362,14 @@
     <string name="nav_upscale">高清</string>
     <string name="nav_browse">图库</string>
 
+    <string name="no_model_loaded">未加载模型</string>
+    <string name="generate_model_not_loaded">生成模型未加载</string>
+    <string name="upscale_model_not_loaded">高清模型未加载</string>
+    <string name="no_model_loaded_hint">请先在\"模型\"标签页中加载一个模型</string>
+    <string name="load_upscale_model">加载高清模型</string>
+    <string name="unload_upscale_model">卸载高清模型</string>
+    <string name="upscale_models_section">高清模型</string>
     <string name="stop_generation">停止生成</string>
+    <string name="model_type_generation">生成</string>
+    <string name="model_type_upscale">高清</string>
 </resources>
