@@ -43,6 +43,7 @@ import io.github.dreamandroid.local.ui.theme.DreamHubTheme
 import io.github.dreamandroid.local.ui.theme.LocalThemeController
 import io.github.dreamandroid.local.ui.theme.rememberThemeController
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {

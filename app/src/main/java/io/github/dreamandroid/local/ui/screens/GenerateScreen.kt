@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
@@ -58,7 +59,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-private data class TokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
+private data class GenerateTokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
 
 private val generateScreenTokenizeClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
@@ -68,7 +69,7 @@ private val generateScreenTokenizeClient: OkHttpClient by lazy {
         .build()
 }
 
-private suspend fun tokenizePromptForGenerate(text: String): TokenizeResult? = withContext(Dispatchers.IO) {
+private suspend fun tokenizePromptForGenerate(text: String): GenerateTokenizeResult? = withContext(Dispatchers.IO) {
     try {
         val body = JSONObject().apply { put("prompt", text) }
             .toString()
@@ -81,7 +82,7 @@ private suspend fun tokenizePromptForGenerate(text: String): TokenizeResult? = w
             if (!response.isSuccessful) return@withContext null
             val payload = response.body?.string() ?: return@withContext null
             val json = JSONObject(payload)
-            TokenizeResult(
+            GenerateTokenizeResult(
                 count = json.optInt("count", 0),
                 maxLength = json.optInt("max_length", 77),
                 overflowOffset = json.optInt("overflow_offset", -1),

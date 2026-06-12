@@ -550,6 +550,13 @@ class BackgroundGenerationService : Service() {
                     }
                 }
             }
+            } catch (e: IOException) {
+                Log.e("BgGenService", "Generation failed with IOException", e)
+                updateState(GenerationState.Error(e.message ?: "Generation failed"))
+            } catch (e: Exception) {
+                Log.e("BgGenService", "Unexpected generation error", e)
+                updateState(GenerationState.Error(e.message ?: "Unexpected error"))
+            }
         }
     }
 
