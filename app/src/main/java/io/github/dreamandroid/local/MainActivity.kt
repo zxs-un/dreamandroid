@@ -515,12 +515,12 @@ private fun AppContent() {
                                 modelRefreshVersion++
                                 // Update selectedModelId to the new ID
                                 selectedModelId = newName.replace(" ", "")
-                                val renameSuccessMsg = getString(R.string.rename_success)
+                                val renameSuccessMsg = context.getString(R.string.rename_success)
                                 scope.launch {
                                     snackbarHostState.showSnackbar(renameSuccessMsg)
                                 }
                             } else {
-                                val renameFailedMsg = getString(R.string.rename_failed, "directory error")
+                                val renameFailedMsg = context.getString(R.string.rename_failed, "directory error")
                                 scope.launch {
                                     snackbarHostState.showSnackbar(renameFailedMsg)
                                 }
@@ -552,9 +552,7 @@ private fun AppContent() {
                         val model = modelRepository.models.find { it.id == selectedModelId }
                         if (model != null) {
                             // Unload if this model is currently loaded
-                            if (isModelLoaded &&
-                                (backendState as? BackendService.BackendState.Running)?.modelId == model.id
-                            ) {
+                            if (isModelLoaded && selectedModelId == model.id) {
                                 unloadModel()
                             }
                             val success = model.deleteModel(context)
@@ -562,12 +560,12 @@ private fun AppContent() {
                                 if (selectedModelId == model.id) selectedModelId = null
                                 modelRepository.refreshAllModels()
                                 modelRefreshVersion++
-                                val deleteSuccessMsg = getString(R.string.delete_success)
+                                val deleteSuccessMsg = context.getString(R.string.delete_success)
                                 scope.launch {
                                     snackbarHostState.showSnackbar(deleteSuccessMsg)
                                 }
                             } else {
-                                val deleteFailedMsg = getString(R.string.delete_failed)
+                                val deleteFailedMsg = context.getString(R.string.delete_failed)
                                 scope.launch {
                                     snackbarHostState.showSnackbar(deleteFailedMsg)
                                 }

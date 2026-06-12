@@ -206,6 +206,8 @@ fun GenerateScreen(
             if (modelId != null) {
                 generationPreferences.saveAllFields(
                     modelId = modelId,
+                    prompt = prompt,
+                    negativePrompt = negativePrompt,
                     steps = steps,
                     cfg = cfg,
                     seed = seed,
@@ -213,6 +215,7 @@ fun GenerateScreen(
                     height = height,
                     denoiseStrength = denoiseStrength,
                     useOpenCL = useOpenCL,
+                    batchCounts = batchCounts,
                     scheduler = scheduler,
                     aspectRatio = inferAspectRatioString(width, height),
                 )
