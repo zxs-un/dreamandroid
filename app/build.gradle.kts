@@ -34,9 +34,17 @@ val versionParts = appVersionName.split(".").map { it.toInt() }
 require(versionParts.size == 5) { "VERSION must contain exactly 5 parts: YYYY.MM.DD.HH.mm, got: $appVersionName" }
 
 // versionCode = Unix timestamp derived from the VERSION file contents (UTC)
-val appVersionCode = java.time.LocalDateTime.of(
-    versionParts[0], versionParts[1], versionParts[2], versionParts[3], versionParts[4]
-).toEpochSecond(java.time.ZoneOffset.UTC).toInt()
+// Uses SimpleDateFormat (always available in Gradle) instead of java.time
+val appVersionCode = try {
+    val sdf = java.text.SimpleDateFormat("yyyy.MM.dd.HH.mm", java.util.Locale.US)
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    val date = requireNotNull(sdf.parse(appVersionName)) { "Failed to parse VERSION: $appVersionName" }
+    (date.time / 1000L).toInt()
+} catch (e: Exception) {
+    // Fallback: remove dots, concatenate as integer (e.g. 2026.06.12.06.00 → 202606120600)
+    println("WARNING: Cannot parse VERSION as timestamp, using fallback versionCode")
+    appVersionName.replace(".", "").toLong().toInt()
+}
 
 android {
     namespace = "io.github.dreamandroid.local"
