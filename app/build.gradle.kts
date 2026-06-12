@@ -47,26 +47,6 @@ android {
         }
     }
 
-    signingConfigs {
-        create("release") {
-            // Use custom keystore if provided, otherwise fallback to debug keystore
-            val storeFileProp = project.findProperty("RELEASE_STORE_FILE") as String?
-            val storePassProp = project.findProperty("RELEASE_STORE_PASSWORD") as String?
-            if (!storeFileProp.isNullOrBlank() && !storePassProp.isNullOrBlank()) {
-                storeFile = file(storeFileProp)
-                storePassword = storePassProp
-                keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-                keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
-            } else {
-                // Fallback to debug keystore when no release keystore is provided
-                storeFile = signingConfigs.getByName("debug").storeFile
-                storePassword = signingConfigs.getByName("debug").storePassword
-                keyAlias = signingConfigs.getByName("debug").keyAlias
-                keyPassword = signingConfigs.getByName("debug").keyPassword
-            }
-        }
-    }
-
     bundle {
         density {
             enableSplit = true
@@ -80,7 +60,19 @@ android {
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release")
+            // Use custom keystore if provided via properties, otherwise default to debug
+            val storeFileProp = project.findProperty("RELEASE_STORE_FILE") as String?
+            val storePassProp = project.findProperty("RELEASE_STORE_PASSWORD") as String?
+            if (!storeFileProp.isNullOrBlank() && !storePassProp.isNullOrBlank()) {
+                signingConfig = signingConfigs.create("release") {
+                    storeFile = file(storeFileProp)
+                    storePassword = storePassProp
+                    keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
+                    keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+                }
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
