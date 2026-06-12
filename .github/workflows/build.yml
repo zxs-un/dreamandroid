@@ -111,6 +111,18 @@ jobs:
           # --- ccache ---
           sudo apt-get install -y -qq ccache
 
+      - name: Cache Rust Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/
+            ~/.cargo/git/
+            ~/.cargo/bin/
+            ~/.rustup/
+            app/src/main/cpp/3rdparty/tokenizers-cpp/rust/target/
+          key: rust-cargo-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/3rdparty/tokenizers-cpp/rust/Cargo.*') }}
+          restore-keys: rust-cargo-${{ runner.os }}-
+
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
@@ -259,7 +271,7 @@ jobs:
         id: gradle-build
         run: |
           set -euo pipefail
-          ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --info 2>&1 | tee build-log.txt
+          ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --quiet 2>&1 | tee build-log.txt
 
       # -------- upload APK (only on success, independent step) --------
       - name: Upload APK
