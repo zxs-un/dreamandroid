@@ -60,7 +60,12 @@ class BackgroundGenerationService : Service() {
 
     sealed class GenerationState {
         object Idle : GenerationState()
-        data class Progress(val progress: Float, val intermediateImage: Bitmap? = null) : GenerationState()
+        data class Progress(
+            val progress: Float,
+            val intermediateImage: Bitmap? = null,
+            val step: Int = 0,
+            val totalSteps: Int = 0,
+        ) : GenerationState()
 
         data class Complete(val bitmap: Bitmap, val seed: Long?) : GenerationState()
         data class Error(val message: String) : GenerationState()
@@ -307,7 +312,7 @@ class BackgroundGenerationService : Service() {
                                         }
                                     }
 
-                                    updateState(GenerationState.Progress(progress, bitmap))
+                                    updateState(GenerationState.Progress(progress, bitmap, step, totalSteps))
                                     updateNotification(progress)
                                 }
 

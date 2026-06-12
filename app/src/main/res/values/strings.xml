@@ -127,6 +127,7 @@
     <string name="negative_prompt">Negative Prompt</string>
     <string name="generate_image">Generate</string>
     <string name="generating">Generating image</string>
+    <string name="steps_label">steps</string>
     <string name="no_results">No results yet</string>
     <string name="no_results_hint">Create an image first~</string>
     <string name="go_to_generate">Create</string>
@@ -366,7 +367,7 @@
     <string name="nav_models">Models</string>
     <string name="nav_generate">Generate</string>
     <string name="nav_upscale">Upscale</string>
-    <string name="nav_browse">Browse</string>
+    <string name="nav_browse">Gallery</string>
 
     <!-- Model Management -->
     <string name="load_model">Load model</string>

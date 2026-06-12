@@ -123,6 +123,7 @@
     <string name="negative_prompt">负面提示</string>
     <string name="generate_image">生成图像</string>
     <string name="generating">正在生成图像</string>
+    <string name="steps_label">步</string>
     <string name="no_results">还没有结果哦</string>
     <string name="no_results_hint">请先在提示词页面生成图像</string>
     <string name="go_to_generate">去生成图像</string>
@@ -351,4 +352,10 @@
     <string name="history_filter_sort_desc">最新优先</string>
     <string name="history_filter_sort_asc">最旧优先</string>
     <string name="history_view_filter">过滤</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_models">模型</string>
+    <string name="nav_generate">生成</string>
+    <string name="nav_upscale">高清</string>
+    <string name="nav_browse">图库</string>
 </resources>

@@ -123,6 +123,7 @@
     <string name="negative_prompt">네거티브 프롬프트</string>
     <string name="generate_image">생성</string>
     <string name="generating">이미지 생성 중</string>
+    <string name="steps_label">스텝</string>
     <string name="no_results">아직 결과가 없습니다</string>
     <string name="no_results_hint">먼저 이미지를 생성해 보세요.</string>
     <string name="go_to_generate">생성하기</string>
@@ -351,4 +352,10 @@
     <string name="history_filter_sort_desc">최신순</string>
     <string name="history_filter_sort_asc">오래된순</string>
     <string name="history_view_filter">필터</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_models">모델</string>
+    <string name="nav_generate">생성</string>
+    <string name="nav_upscale">업스케일</string>
+    <string name="nav_browse">갤러리</string>
 </resources>

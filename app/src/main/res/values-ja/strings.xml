@@ -111,6 +111,7 @@
     <string name="negative_prompt">ネガティブプロンプト</string>
     <string name="generate_image">生成</string>
     <string name="generating">画像を生成中</string>
+    <string name="steps_label">ステップ</string>
     <string name="no_results">まだ結果がありません</string>
     <string name="no_results_hint">まず画像を作成してください</string>
     <string name="go_to_generate">作成</string>
@@ -323,4 +324,10 @@
     <string name="history_filter_sort_desc">新しい順</string>
     <string name="history_filter_sort_asc">古い順</string>
     <string name="history_view_filter">フィルター</string>
+
+    <!-- Bottom Navigation -->
+    <string name="nav_models">モデル</string>
+    <string name="nav_generate">生成</string>
+    <string name="nav_upscale">アップスケール</string>
+    <string name="nav_browse">ギャラリー</string>
 </resources>

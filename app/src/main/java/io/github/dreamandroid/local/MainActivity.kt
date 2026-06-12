@@ -35,8 +35,6 @@ import io.github.dreamandroid.local.data.*
 import io.github.dreamandroid.local.navigation.BottomTab
 import io.github.dreamandroid.local.service.BackendService
 import io.github.dreamandroid.local.service.BackgroundGenerationService
-import io.github.dreamandroid.local.ui.components.BlockingProgressOverlay
-import io.github.dreamandroid.local.ui.components.SmoothLinearWavyProgressIndicator
 import io.github.dreamandroid.local.ui.screens.*
 import io.github.dreamandroid.local.ui.theme.DreamHubTheme
 import io.github.dreamandroid.local.ui.theme.LocalThemeController
@@ -131,6 +129,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+// =========== Importing model state ===========
+
+data class ImportingModelState(
+    val modelId: String,
+    val modelName: String,
+    val isNpu: Boolean,
+    val progressText: String,
+    val byteProgress: ExtractByteProgress?,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AppContent() {
@@ -183,9 +191,7 @@ private fun AppContent() {
     // ---- Import dialog state ----
     var showCustomModelDialog by remember { mutableStateOf(false) }
     var showCustomNpuModelDialog by remember { mutableStateOf(false) }
-    var isConverting by remember { mutableStateOf(false) }
-    var conversionProgress by remember { mutableStateOf("") }
-    var extractByteProgress by remember { mutableStateOf<ExtractByteProgress?>(null) }
+    var importingModel by remember { mutableStateOf<ImportingModelState?>(null) }
 
     val msgNpuModelAddedSuccess = stringResource(R.string.npu_model_added_success)
     val msgNpuModelAddFailed = stringResource(R.string.npu_model_add_failed)
@@ -269,6 +275,14 @@ private fun AppContent() {
             onDismiss = { showCustomModelDialog = false },
             onModelAdded = { modelName, fileUri, clipSkip, loraFiles ->
                 showCustomModelDialog = false
+                val modelId = modelName.replace(" ", "")
+                importingModel = ImportingModelState(
+                    modelId = modelId,
+                    modelName = modelName,
+                    isNpu = false,
+                    progressText = stringResource(R.string.preparing_model),
+                    byteProgress = null,
+                )
                 scope.launch {
                     convertCustomModel(
                         context = context,
@@ -276,10 +290,10 @@ private fun AppContent() {
                         fileUri = fileUri,
                         clipSkip = clipSkip,
                         loraFiles = loraFiles,
-                        onProgress = { conversionProgress = it },
-                        onStart = { isConverting = true },
+                        onProgress = { importingModel = importingModel?.copy(progressText = it) },
+                        onStart = {},
                         onSuccess = {
-                            isConverting = false
+                            importingModel = null
                             modelRepository.refreshAllModels()
                             modelRefreshVersion++
                             scope.launch {
@@ -287,7 +301,7 @@ private fun AppContent() {
                             }
                         },
                         onError = { error ->
-                            isConverting = false
+                            importingModel = null
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     msgModelConversionFailed.format(error)
@@ -307,22 +321,28 @@ private fun AppContent() {
             onDismiss = { showCustomNpuModelDialog = false },
             onModelAdded = { modelName, zipUri ->
                 showCustomNpuModelDialog = false
+                val modelId = modelName.replace(" ", "")
+                importingModel = ImportingModelState(
+                    modelId = modelId,
+                    modelName = modelName,
+                    isNpu = true,
+                    progressText = stringResource(R.string.preparing_model),
+                    byteProgress = null,
+                )
                 scope.launch {
                     extractNpuModel(
                         context = context,
                         modelName = modelName,
                         zipUri = zipUri,
-                        onProgress = { conversionProgress = it },
+                        onProgress = { importingModel = importingModel?.copy(progressText = it) },
                         onByteProgress = { extracted, total, fraction ->
-                            extractByteProgress = ExtractByteProgress(extracted, total, fraction)
+                            importingModel = importingModel?.copy(
+                                byteProgress = ExtractByteProgress(extracted, total, fraction)
+                            )
                         },
-                        onStart = {
-                            extractByteProgress = null
-                            isConverting = true
-                        },
+                        onStart = {},
                         onSuccess = {
-                            isConverting = false
-                            extractByteProgress = null
+                            importingModel = null
                             modelRepository.refreshAllModels()
                             modelRefreshVersion++
                             scope.launch {
@@ -330,8 +350,7 @@ private fun AppContent() {
                             }
                         },
                         onError = { error ->
-                            isConverting = false
-                            extractByteProgress = null
+                            importingModel = null
                             scope.launch {
                                 snackbarHostState.showSnackbar(
                                     msgNpuModelAddFailed.format(error)
@@ -344,42 +363,27 @@ private fun AppContent() {
         )
     }
 
-    // Conversion overlay
-    BlockingProgressOverlay(
-        visible = isConverting,
-    ) {
-        SmoothLinearWavyProgressIndicator(
-            progress = extractByteProgress?.fraction ?: 0f,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Text(
-            text = conversionProgress.ifEmpty { stringResource(R.string.preparing_model) },
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        extractByteProgress?.let { bp ->
-            LinearProgressIndicator(
-                progress = { bp.fraction },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                text = "${bp.extractedBytes / 1024} KB / ${bp.totalCompressedBytes / 1024} KB",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-
     // ---- Drawer content ----
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    text = stringResource(R.string.settings),
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 28.dp, top = 16.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = stringResource(R.string.settings),
+                        style = MaterialTheme.typography.headlineSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = { scope.launch { drawerState.close() } }) {
+                        Icon(Icons.Default.Close, stringResource(R.string.close))
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
                 AppSettingsDrawerContent(
                     modifier = Modifier
@@ -399,6 +403,8 @@ private fun AppContent() {
                         isModelLoading = isModelLoading,
                         onLoadModel = { loadModel(it) },
                         onUnloadModel = { unloadModel() },
+                        onImportModel = { showCustomModelDialog = true },
+                        onImportNpuModel = { showCustomNpuModelDialog = true },
                     )
                     BottomTab.Generate -> GenerateTopBar(
                         drawerState = drawerState,
@@ -414,6 +420,7 @@ private fun AppContent() {
                         scheduler = genScheduler,
                         denoiseStrength = genDenoiseStrength,
                         useOpenCL = genUseOpenCL,
+                        batchCounts = genBatchCounts,
                     )
                     BottomTab.Upscale -> UpscaleTopBar(drawerState = drawerState)
                     BottomTab.Browse -> BrowseTopBar(drawerState = drawerState)
@@ -446,8 +453,7 @@ private fun AppContent() {
                         onLoadModel = { loadModel(it) },
                         modelRepository = modelRepository,
                         refreshVersion = modelRefreshVersion,
-                        onImportModel = { showCustomModelDialog = true },
-                        onImportNpuModel = { showCustomNpuModelDialog = true },
+                        importingModel = importingModel,
                     )
                     BottomTab.Generate -> TabGenerateScreen(
                         modelId = if (isModelLoaded) selectedModelId else null,
@@ -493,10 +499,13 @@ private fun ModelsTopBar(
     isModelLoading: Boolean,
     onLoadModel: (String) -> Unit,
     onUnloadModel: () -> Unit,
+    onImportModel: () -> Unit = {},
+    onImportNpuModel: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
+    var showImportMenu by remember { mutableStateOf(false) }
     TopAppBar(
-        title = { Text(stringResource(R.string.nav_models)) },
+        title = {},
         navigationIcon = {
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                 Icon(Icons.Default.Menu, stringResource(R.string.settings))
@@ -525,6 +534,39 @@ private fun ModelsTopBar(
                     }
                 }
             }
+
+            Box {
+                IconButton(onClick = { showImportMenu = true }) {
+                    Icon(Icons.Default.Add, stringResource(R.string.import_model))
+                }
+                DropdownMenu(
+                    expanded = showImportMenu,
+                    onDismissRequest = { showImportMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.import_model)) },
+                        onClick = {
+                            showImportMenu = false
+                            onImportModel()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Memory, contentDescription = null)
+                        },
+                    )
+                    if (Model.isQualcommDevice()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.import_npu_model)) },
+                            onClick = {
+                                showImportMenu = false
+                                onImportNpuModel()
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Speed, contentDescription = null)
+                            },
+                        )
+                    }
+                }
+            }
         },
     )
 }
@@ -545,13 +587,17 @@ private fun GenerateTopBar(
     scheduler: String,
     denoiseStrength: Float,
     useOpenCL: Boolean,
+    batchCounts: Int = 1,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val serviceState by BackgroundGenerationService.generationState.collectAsState()
-    val isRunning = serviceState is BackgroundGenerationService.GenerationState.Progress
+    val progressState = serviceState as? BackgroundGenerationService.GenerationState.Progress
+    val isRunning = progressState != null
     val modelRepository = remember { ModelRepository(context) }
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
+
+    var batchIndex by remember { mutableIntStateOf(0) }
 
     var showNoModelWarning by remember { mutableStateOf(false) }
     if (showNoModelWarning) {
@@ -569,16 +615,33 @@ private fun GenerateTopBar(
 
     TopAppBar(
         title = {
-            Column {
-                Text(stringResource(R.string.nav_generate), maxLines = 1)
-                if (isModelLoaded && model != null) {
-                    Text(
-                        text = model.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1,
+            if (isRunning && progressState != null) {
+                val cur = progressState.step
+                val tot = progressState.totalSteps
+                if (tot > 0) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.5.dp,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "$cur / $tot",
+                            maxLines = 1,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
+                } else {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.5.dp,
                     )
                 }
+            } else if (isModelLoaded && model != null) {
+                Text(
+                    text = model.name,
+                    maxLines = 1,
+                )
             }
         },
         navigationIcon = {
@@ -587,38 +650,58 @@ private fun GenerateTopBar(
             }
         },
         actions = {
-            TextButton(
-                onClick = {
-                    if (!isModelLoaded || modelId == null) {
-                        showNoModelWarning = true
-                    } else {
-                        scope.launch {
-                            val intent = Intent(context, BackgroundGenerationService::class.java).apply {
-                                putExtra("prompt", prompt)
-                                putExtra("negative_prompt", negativePrompt)
-                                putExtra("steps", steps.roundToInt())
-                                putExtra("cfg", cfg)
-                                seed.toLongOrNull()?.let { putExtra("seed", it) }
-                                putExtra("width", width)
-                                putExtra("height", height)
-                                putExtra("effective_width", width)
-                                putExtra("effective_height", height)
-                                putExtra("denoise_strength", denoiseStrength)
-                                putExtra("use_opencl", useOpenCL)
-                                putExtra("scheduler", scheduler)
-                                putExtra("aspect_ratio", "1:1")
+            if (isRunning) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${batchIndex.coerceAtLeast(1)} / $batchCounts",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Icon(
+                        Icons.Default.Collections,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+            } else {
+                TextButton(
+                    onClick = {
+                        if (!isModelLoaded || modelId == null) {
+                            showNoModelWarning = true
+                        } else {
+                            scope.launch {
+                                val total = batchCounts.coerceAtLeast(1)
+                                for (i in 0 until total) {
+                                    batchIndex = i + 1
+                                    val intent = Intent(context, BackgroundGenerationService::class.java).apply {
+                                        putExtra("prompt", prompt)
+                                        putExtra("negative_prompt", negativePrompt)
+                                        putExtra("steps", steps.roundToInt())
+                                        putExtra("cfg", cfg)
+                                        seed.toLongOrNull()?.let { putExtra("seed", it) }
+                                        putExtra("width", width)
+                                        putExtra("height", height)
+                                        putExtra("effective_width", width)
+                                        putExtra("effective_height", height)
+                                        putExtra("denoise_strength", denoiseStrength)
+                                        putExtra("use_opencl", useOpenCL)
+                                        putExtra("scheduler", scheduler)
+                                        putExtra("aspect_ratio", "1:1")
+                                    }
+                                    context.startForegroundService(intent)
+                                    // Wait for completion or error
+                                    BackgroundGenerationService.generationState
+                                        .first { it is BackgroundGenerationService.GenerationState.Complete || it is BackgroundGenerationService.GenerationState.Error }
+                                    delay(200)
+                                    BackgroundGenerationService.clearCompleteState()
+                                }
+                                batchIndex = 0
                             }
-                            context.startForegroundService(intent)
                         }
-                    }
-                },
-                enabled = !isRunning,
-            ) {
-                if (isRunning) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.generating))
-                } else {
+                    },
+                ) {
                     Icon(Icons.Default.AutoAwesome, null, Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
                     Text(stringResource(R.string.generate_image))
@@ -633,7 +716,7 @@ private fun GenerateTopBar(
 private fun BrowseTopBar(drawerState: DrawerState) {
     val scope = rememberCoroutineScope()
     TopAppBar(
-        title = { Text(stringResource(R.string.nav_browse)) },
+        title = {},
         navigationIcon = {
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                 Icon(Icons.Default.Menu, stringResource(R.string.settings))
@@ -647,7 +730,7 @@ private fun BrowseTopBar(drawerState: DrawerState) {
 private fun UpscaleTopBar(drawerState: DrawerState) {
     val scope = rememberCoroutineScope()
     TopAppBar(
-        title = { Text(stringResource(R.string.image_upscale)) },
+        title = {},
         navigationIcon = {
             IconButton(onClick = { scope.launch { drawerState.open() } }) {
                 Icon(Icons.Default.Menu, stringResource(R.string.settings))
@@ -666,15 +749,14 @@ private fun ModelListTab(
     onLoadModel: (String) -> Unit,
     modelRepository: ModelRepository,
     refreshVersion: Int,
-    onImportModel: () -> Unit,
-    onImportNpuModel: () -> Unit,
+    importingModel: ImportingModelState? = null,
 ) {
     // Only show custom (imported) models
     val customModels = remember(modelRepository.models, refreshVersion) {
         modelRepository.models.filter { it.isCustom }
     }
 
-    if (customModels.isEmpty()) {
+    if (customModels.isEmpty() && importingModel == null) {
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -694,20 +776,6 @@ private fun ModelListTab(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onImportModel) {
-                        Icon(Icons.Default.Add, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.import_model))
-                    }
-                    if (Model.isQualcommDevice()) {
-                        OutlinedButton(onClick = onImportNpuModel) {
-                            Icon(Icons.Default.Add, null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.import_npu_model))
-                        }
-                    }
-                }
             }
         }
     } else {
@@ -716,29 +784,9 @@ private fun ModelListTab(
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    OutlinedButton(
-                        onClick = onImportModel,
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Icon(Icons.Default.Add, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.import_model))
-                    }
-                    if (Model.isQualcommDevice()) {
-                        OutlinedButton(
-                            onClick = onImportNpuModel,
-                            modifier = Modifier.weight(1f),
-                        ) {
-                            Icon(Icons.Default.Add, null, Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.import_npu_model))
-                        }
-                    }
+            importingModel?.let { imp ->
+                item(key = "importing_${imp.modelId}") {
+                    ImportingModelCard(state = imp)
                 }
             }
 
@@ -751,6 +799,82 @@ private fun ModelListTab(
                     isSelected = selectedModelId == model.id,
                     isActive = isModelLoaded && selectedModelId == model.id,
                     onSelect = { onSelectModel(model.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportingModelCard(state: ImportingModelState) {
+    val fraction = state.byteProgress?.fraction ?: 0f
+    val bytesProgress = state.byteProgress
+
+    ElevatedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+        ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.5.dp,
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = state.modelName,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = state.progressText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Badge(
+                    containerColor = if (state.isNpu) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    },
+                    contentColor = if (state.isNpu) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onTertiaryContainer
+                    },
+                ) {
+                    Text(
+                        text = if (state.isNpu) "NPU" else "CPU",
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+
+            if (bytesProgress != null) {
+                LinearProgressIndicator(
+                    progress = { fraction },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = "${(fraction * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
