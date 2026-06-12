@@ -71,15 +71,31 @@ android {
     }
     buildTypes {
         release {
-            // Use custom keystore if provided via properties, otherwise default to debug
-            val storeFileProp = project.findProperty("RELEASE_STORE_FILE") as String?
-            val storePassProp = project.findProperty("RELEASE_STORE_PASSWORD") as String?
-            if (!storeFileProp.isNullOrBlank() && !storePassProp.isNullOrBlank()) {
+            // Load signing properties from Gradle props OR a keystore properties file (CI-friendly)
+            fun getSigningProp(key: String): String? {
+                // Priority 1: direct Gradle property (e.g. -PRELEASE_STORE_FILE=... or gradle.properties)
+                project.findProperty(key)?.toString()?.takeIf { it.isNotBlank() }?.let { return it }
+                // Priority 2: properties file pointed by -PkeystorePropertiesFile=...
+                val propsFile = project.findProperty("keystorePropertiesFile")?.toString()
+                if (!propsFile.isNullOrBlank()) {
+                    val f = rootProject.file(propsFile)
+                    if (f.exists()) {
+                        val p = java.util.Properties()
+                        p.load(f.inputStream())
+                        return p.getProperty(key)
+                    }
+                }
+                return null
+            }
+
+            val storeFile = getSigningProp("RELEASE_STORE_FILE")
+            val storePass = getSigningProp("RELEASE_STORE_PASSWORD")
+            if (!storeFile.isNullOrBlank() && !storePass.isNullOrBlank()) {
                 signingConfig = signingConfigs.create("release") {
-                    storeFile = file(storeFileProp)
-                    storePassword = storePassProp
-                    keyAlias = project.findProperty("RELEASE_KEY_ALIAS") as String?
-                    keyPassword = project.findProperty("RELEASE_KEY_PASSWORD") as String?
+                    storeFile = file(storeFile)
+                    storePassword = storePass
+                    keyAlias = getSigningProp("RELEASE_KEY_ALIAS")
+                    keyPassword = getSigningProp("RELEASE_KEY_PASSWORD")
                 }
             } else {
                 signingConfig = signingConfigs.getByName("debug")

@@ -13,3 +13,6 @@ app/release
 app/basic
 app/filter
 app/src/main/assets/qnnlibs
+*.jks
+*.keystore
+keystore.properties

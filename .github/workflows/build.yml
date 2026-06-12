@@ -267,11 +267,70 @@ jobs:
           validate-wrappers: false
           cache-read-only: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
 
+      - name: Get or create release keystore from qairt
+        run: |
+          set -euo pipefail
+          # Default Android debug credentials (public, known values)
+          KEYSTORE_PASS="android"
+          KEY_ALIAS="androiddebugkey"
+          KEY_PASS="android"
+
+          QAIRT_REPO="git@github.com:${{ github.repository_owner }}/qairt.git"
+
+          # Set up SSH for qairt private repo
+          mkdir -p ~/.ssh
+          echo "$QAIRT_DEPLOY_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          # Clone qairt to /tmp to avoid polluting workspace
+          git clone --depth 1 "$QAIRT_REPO" /tmp/qairt_ks 2>/dev/null || true
+
+          if [ -d /tmp/qairt_ks/.git ]; then
+            cd /tmp/qairt_ks
+            if git fetch origin keystore 2>/dev/null && git checkout keystore 2>/dev/null; then
+              cp release.keystore "$GITHUB_WORKSPACE/release.keystore"
+              echo "✅ Using existing keystore from qairt@keystore"
+            else
+              echo "🔑 keystore branch not found, generating new keystore..."
+              keytool -genkey -v \
+                -keystore "$GITHUB_WORKSPACE/release.keystore" \
+                -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+                -storepass "$KEYSTORE_PASS" -keypass "$KEY_PASS" \
+                -dname "CN=Android Debug, OU=DreamHub, O=DreamHub, L=Unknown, ST=Unknown, C=US"
+
+              # Push to qairt as orphan branch (only keystore file, nothing else)
+              git checkout --orphan keystore
+              git rm -rf --ignore-unmatch . 2>/dev/null || true
+              cp "$GITHUB_WORKSPACE/release.keystore" .
+              git add release.keystore
+              git -c user.name="CI" -c user.email="ci@dreamhub" \
+                commit -m "Store release keystore"
+              git push origin keystore --force
+              echo "✅ Generated and stored keystore to qairt@keystore"
+            fi
+            cd "$GITHUB_WORKSPACE"
+          else
+            echo "⚠️  Cannot access qairt repo — falling back to debug keystore"
+          fi
+
+          # Write keystore.properties for Gradle
+          echo "RELEASE_STORE_FILE=${GITHUB_WORKSPACE}/release.keystore" > keystore.properties
+          echo "RELEASE_STORE_PASSWORD=${KEYSTORE_PASS}" >> keystore.properties
+          echo "RELEASE_KEY_ALIAS=${KEY_ALIAS}" >> keystore.properties
+          echo "RELEASE_KEY_PASSWORD=${KEY_PASS}" >> keystore.properties
+        env:
+          QAIRT_DEPLOY_KEY: ${{ secrets.QAIRT_DEPLOY_KEY }}
+
       - name: Gradle assemble
         id: gradle-build
         run: |
           set -euo pipefail
-          ./gradlew assembleBasicRelease -x ktlintCheck -x detekt --quiet 2>&1 | tee build-log.txt
+          GRADLE_ARGS="assembleBasicRelease -x ktlintCheck -x detekt --quiet"
+          if [ -f keystore.properties ]; then
+            GRADLE_ARGS="$GRADLE_ARGS -PkeystorePropertiesFile=${PWD}/keystore.properties"
+          fi
+          ./gradlew $GRADLE_ARGS 2>&1 | tee build-log.txt
 
       # -------- upload APK (only on success, independent step) --------
       - name: Upload APK
