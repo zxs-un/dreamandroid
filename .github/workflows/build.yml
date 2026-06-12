@@ -144,33 +144,6 @@ jobs:
           path: app/src/main/native-build-log.txt
           retention-days: 7
 
-  # ============================================================
-  # Stage 3 — GitHub Release (tag push or manual trigger only)
-  # ============================================================
-  release:
-    runs-on: ubuntu-24.04
-    needs: [native, apk]
-    if: |
-      always() &&
-      !cancelled() &&
-      needs.native.result == 'success' &&
-      needs.apk.result == 'success' &&
-      (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release == 'true')
-
-    steps:
-      - name: Download APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: dreamandroid-APK
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dreamandroid_armv8a_*.apk
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          generate_release_notes: true
-
       # -------- prepare native outputs for APK --------
       - name: Prepare native outputs
         run: |
@@ -186,7 +159,7 @@ jobs:
           path: native-out/
 
   # ============================================================
-  # Stage 2 — Kotlin Compile & APK Packaging
+  # Stage 2 — Kotlin Compile & APK Packaging (release build)
   # ============================================================
   apk:
     runs-on: ubuntu-24.04
@@ -307,15 +280,15 @@ jobs:
           retention-days: 7
 
   # ============================================================
-  # Stage 3 — GitHub Release (tag push or manual trigger only)
+  # Stage 3 — Publish GitHub Release (tag push or manual trigger)
   # ============================================================
-  release:
+  github-release:
     runs-on: ubuntu-24.04
     needs: [native, apk]
     if: |
       always() &&
       !cancelled() &&
-      needs.native.result == 'success' &&
+      (needs.native.result == 'success' || needs.native.result == 'skipped') &&
       needs.apk.result == 'success' &&
       (startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release == 'true')
 
