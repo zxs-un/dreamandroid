@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -80,7 +82,7 @@ android {
                 if (!propsFile.isNullOrBlank()) {
                     val f = rootProject.file(propsFile)
                     if (f.exists()) {
-                        val p = java.util.Properties()
+                        val p = Properties()
                         p.load(f.inputStream())
                         return p.getProperty(key)
                     }
@@ -88,11 +90,11 @@ android {
                 return null
             }
 
-            val storeFile = getSigningProp("RELEASE_STORE_FILE")
+            val storeFilePath = getSigningProp("RELEASE_STORE_FILE")
             val storePass = getSigningProp("RELEASE_STORE_PASSWORD")
-            if (!storeFile.isNullOrBlank() && !storePass.isNullOrBlank()) {
+            if (!storeFilePath.isNullOrBlank() && !storePass.isNullOrBlank()) {
                 signingConfig = signingConfigs.create("release") {
-                    storeFile = file(storeFile)
+                    storeFile = file(storeFilePath)
                     storePassword = storePass
                     keyAlias = getSigningProp("RELEASE_KEY_ALIAS")
                     keyPassword = getSigningProp("RELEASE_KEY_PASSWORD")

@@ -156,6 +156,7 @@
     <string name="image_size">画像サイズ: %1$dx%2$d</string>
     <string name="random_seed">ランダムシード(任意)</string>
     <string name="use_last_seed">最後に利用したシードを利用 (%s)</string>
+    <string name="batch_count_label">生成枚数</string>
     <string name="batch_count">生成枚数: %d</string>
     <string name="reproduce">コピー</string>
     <string name="reproduce_params_title">パラメータを再現</string>
@@ -332,4 +333,21 @@
     <string name="nav_browse">ギャラリー</string>
 
     <string name="stop_generation">生成停止</string>
+    <string name="no_model_loaded">モデル未読み込み</string>
+    <string name="generate_model_not_loaded">生成モデル未読み込み</string>
+    <string name="upscale_model_not_loaded">アップスケールモデル未読み込み</string>
+    <string name="no_model_loaded_hint">先に「モデル」タブでモデルを読み込んでください</string>
+    <string name="load_upscale_model">アップスケールモデル読み込み</string>
+    <string name="unload_upscale_model">アップスケールモデル解除</string>
+    <string name="upscale_models_section">アップスケールモデル</string>
+    <string name="select_model_hint">モデルを選択して読み込みをクリック</string>
+    <string name="import_model">モデルファイルをインポート</string>
+    <string name="import_npu_model">NPUモデルZIPをインポート</string>
+    <string name="import_upscale_model">アップスケールモデルをインポート</string>
+    <string name="add_custom_upscale_model">アップスケールモデル追加</string>
+    <string name="select_upscale_file">アップスケールモデルファイルを選択 (.bin)</string>
+    <string name="upscale_file_selected">アップスケールモデルファイル選択済</string>
+    <string name="custom_upscale_model_name_hint">アップスケールモデル名を入力</string>
+    <string name="model_type_generation">生成</string>
+    <string name="model_type_upscale">アップスケール</string>
 </resources>

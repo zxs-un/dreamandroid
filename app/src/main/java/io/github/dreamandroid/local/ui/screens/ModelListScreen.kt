@@ -1461,6 +1461,147 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                         }
                                     },
                                 )
+                                // ---- Timeout / interval settings ----
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                ) {
+                                    var genTimeout by remember {
+                                        mutableIntStateOf(
+                                            preferences.getInt("generation_timeout_s", 60),
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.generation_timeout),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.generation_timeout_hint, genTimeout),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Slider(
+                                        value = genTimeout.toFloat(),
+                                        onValueChange = {
+                                            genTimeout = it.toInt()
+                                            preferences.edit {
+                                                putInt("generation_timeout_s", it.toInt())
+                                            }
+                                        },
+                                        valueRange = 10f..300f,
+                                        steps = 28,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                ) {
+                                    var bitmapTimeout by remember {
+                                        mutableIntStateOf(
+                                            preferences.getInt("bitmap_consumed_timeout_s", 30),
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.bitmap_consumed_timeout),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.bitmap_consumed_timeout_hint, bitmapTimeout),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Slider(
+                                        value = bitmapTimeout.toFloat(),
+                                        onValueChange = {
+                                            bitmapTimeout = it.toInt()
+                                            preferences.edit {
+                                                putInt("bitmap_consumed_timeout_s", it.toInt())
+                                            }
+                                        },
+                                        valueRange = 5f..120f,
+                                        steps = 22,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                ) {
+                                    var healthInterval by remember {
+                                        mutableIntStateOf(
+                                            preferences.getInt("health_check_retry_interval_s", 20),
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.health_check_retry_interval),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.health_check_retry_interval_hint, healthInterval),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Slider(
+                                        value = healthInterval.toFloat(),
+                                        onValueChange = {
+                                            healthInterval = it.toInt()
+                                            preferences.edit {
+                                                putInt("health_check_retry_interval_s", it.toInt())
+                                            }
+                                        },
+                                        valueRange = 5f..120f,
+                                        steps = 22,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = 16.dp),
+                                )
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp),
+                                ) {
+                                    var maxFails by remember {
+                                        mutableIntStateOf(
+                                            preferences.getInt("health_check_max_failures", 4),
+                                        )
+                                    }
+                                    Text(
+                                        text = stringResource(R.string.health_check_max_failures),
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.health_check_max_failures_hint, maxFails),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Slider(
+                                        value = maxFails.toFloat(),
+                                        onValueChange = {
+                                            maxFails = it.toInt()
+                                            preferences.edit {
+                                                putInt("health_check_max_failures", it.toInt())
+                                            }
+                                        },
+                                        valueRange = 1f..10f,
+                                        steps = 8,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
                             }
                         }
                     }
@@ -2320,6 +2461,100 @@ fun CustomNpuModelDialog(context: Context, onDismiss: () -> Unit, onModelAdded: 
                     }
                 },
                 enabled = modelName.isNotBlank() && selectedZipUri != null && !isIdReserved,
+            ) {
+                Text(stringResource(R.string.add_model))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+fun CustomUpscaleModelDialog(
+    context: Context,
+    onDismiss: () -> Unit,
+    onModelAdded: (String, Uri) -> Unit,
+) {
+    var modelName by remember { mutableStateOf("") }
+    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
+    val isIdReserved = modelName.isNotBlank() &&
+        ModelRepository.isReservedModelId(modelName.replace(" ", ""))
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent(),
+    ) { uri ->
+        uri?.let {
+            selectedFileUri = it
+            if (modelName.isBlank()) {
+                getFileNameFromUri(context, it)?.let { fileName ->
+                    modelName = fileName.substringBeforeLast(".")
+                }
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.add_custom_upscale_model)) },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                OutlinedTextField(
+                    value = modelName,
+                    onValueChange = { modelName = it },
+                    label = { Text(stringResource(R.string.custom_model_name)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.custom_upscale_model_name_hint)) },
+                    isError = isIdReserved,
+                    supportingText = if (isIdReserved) {
+                        { Text(stringResource(R.string.custom_model_id_reserved)) }
+                    } else {
+                        null
+                    },
+                )
+
+                FilledTonalButton(
+                    onClick = {
+                        filePickerLauncher.launch("*/*")
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Folder,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = selectedFileUri?.let { stringResource(R.string.upscale_file_selected) }
+                            ?: stringResource(R.string.select_upscale_file),
+                    )
+                }
+
+                selectedFileUri?.let { uri ->
+                    Text(
+                        text = "Selected: ${getCleanFileName(uri)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (modelName.isNotBlank() && selectedFileUri != null && !isIdReserved) {
+                        onModelAdded(modelName, selectedFileUri!!)
+                    }
+                },
+                enabled = modelName.isNotBlank() && selectedFileUri != null && !isIdReserved,
             ) {
                 Text(stringResource(R.string.add_model))
             }

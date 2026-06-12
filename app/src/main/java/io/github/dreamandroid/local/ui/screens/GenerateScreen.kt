@@ -296,12 +296,53 @@ fun GenerateScreen(
                 // ---- Zero-Trust: Stale state detection before each iteration ----
                 BackgroundGenerationService.forceResetIfStale()
 
-                // ---- Zero-Trust: Backend health check ----
-                val backendHealthy = withContext(Dispatchers.IO) {
-                    BackgroundGenerationService.checkBackendHealth()
+                // ---- Zero-Trust: Backend health check with retry and auto-restart ----
+                val healthCheckRetryInterval = BackgroundGenerationService.getHealthCheckRetryIntervalMs(context)
+                val healthCheckMaxFails = BackgroundGenerationService.getHealthCheckMaxFailures(context)
+                var backendHealthy = false
+                var consecutiveFailures = 0
+                while (!backendHealthy) {
+                    backendHealthy = withContext(Dispatchers.IO) {
+                        BackgroundGenerationService.checkBackendHealth()
+                    }
+                    if (!backendHealthy) {
+                        consecutiveFailures++
+                        Log.w("GenerateScreen",
+                            "Backend health check failed ($consecutiveFailures/$healthCheckMaxFails)")
+
+                        if (consecutiveFailures >= healthCheckMaxFails) {
+                            Log.e("GenerateScreen",
+                                "Backend health check failed $consecutiveFailures times consecutively, restarting backend")
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                                    delay(500)
+                                    context.stopService(Intent(context, BackendService::class.java).apply {
+                                        action = BackendService.ACTION_STOP
+                                    })
+                                    delay(2000)
+                                    modelId?.let { mid ->
+                                        val restartIntent = Intent(context, BackendService::class.java).apply {
+                                            putExtra("modelId", mid)
+                                            putExtra("width", width)
+                                            putExtra("height", height)
+                                            putExtra("use_opencl", useOpenCL)
+                                        }
+                                        context.startForegroundService(restartIntent)
+                                    }
+                                }
+                                consecutiveFailures = 0
+                            } catch (e: Exception) {
+                                Log.e("GenerateScreen",
+                                    "Failed to restart backend: ${e.message}", e)
+                                errorMessage = context.getString(R.string.backend_not_healthy)
+                                break
+                            }
+                        }
+                        delay(healthCheckRetryInterval)
+                    }
                 }
                 if (!backendHealthy) {
-                    errorMessage = context.getString(R.string.backend_not_healthy)
                     break
                 }
 
@@ -331,10 +372,17 @@ fun GenerateScreen(
                         putExtra("scheduler", scheduler)
                         putExtra("aspect_ratio", "1:1")
                     }
+
+                    // Guard: if the batch was cancelled (user clicked stop),
+                    // do NOT start a new service request.
+                    if (!isActive) {
+                        Log.w("GenerateScreen", "Batch cancelled, not starting new request")
+                        break
+                    }
                     context.startForegroundService(intent)
 
                     // ---- Zero-Trust: Wait with timeout (not indefinite .first {}) ----
-                    val result = withTimeoutOrNull(BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS) {
+                    val result = withTimeoutOrNull(BackgroundGenerationService.getServiceWaitTimeoutMs(context)) {
                         BackgroundGenerationService.generationState
                             .first { it is BackgroundGenerationService.GenerationState.Complete ||
                                      it is BackgroundGenerationService.GenerationState.Error }
@@ -343,7 +391,7 @@ fun GenerateScreen(
                     when {
                         // Timeout — service may have hung, force reset and retry
                         result == null -> {
-                            Log.w("GenerateScreen", "Batch item $i timed out after ${BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS}ms")
+                            Log.w("GenerateScreen", "Batch item $i timed out after ${BackgroundGenerationService.getServiceWaitTimeoutMs(context)}ms")
                             errorMessage = context.getString(R.string.generation_timeout_retry, retryAttempt)
                             BackgroundGenerationService.resetState()
                             context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
@@ -372,9 +420,10 @@ fun GenerateScreen(
                     }
 
                     // ---- Zero-Trust: Wait for service to stop with timeout ----
+                    val serviceWaitTimeout = BackgroundGenerationService.getServiceWaitTimeoutMs(context)
                     val waitStartTime = System.currentTimeMillis()
                     while (BackgroundGenerationService.isServiceRunning.value) {
-                        if (System.currentTimeMillis() - waitStartTime > BackgroundGenerationService.SERVICE_WAIT_TIMEOUT_MS) {
+                        if (System.currentTimeMillis() - waitStartTime > serviceWaitTimeout) {
                             Log.w("GenerateScreen", "Service did not stop within timeout, forcing stop")
                             context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
                             delay(500)
@@ -425,7 +474,7 @@ fun GenerateScreen(
             var batchText by remember(batchCounts) { mutableStateOf(batchCounts.toString()) }
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    stringResource(R.string.batch_count, batchCounts),
+                    stringResource(R.string.batch_count_label),
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Spacer(Modifier.height(4.dp))

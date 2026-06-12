@@ -32,6 +32,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import java.io.File
 import io.github.dreamandroid.local.data.*
 import io.github.dreamandroid.local.navigation.BottomTab
 import io.github.dreamandroid.local.service.BackendService
@@ -42,7 +43,9 @@ import io.github.dreamandroid.local.ui.screens.*
 import io.github.dreamandroid.local.ui.theme.DreamHubTheme
 import io.github.dreamandroid.local.ui.theme.LocalThemeController
 import io.github.dreamandroid.local.ui.theme.rememberThemeController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -195,17 +198,30 @@ private fun AppContent() {
     // ---- Batch generation state (driven by GenerateScreen, consumed by GenerateTopBar) ----
     val serviceState by BackgroundGenerationService.generationState.collectAsState()
     val progressState = serviceState as? BackgroundGenerationService.GenerationState.Progress
-    val isGenerating = progressState != null
+    val isServiceRunning by BackgroundGenerationService.isServiceRunning.collectAsState()
+    // Stop button remains visible while the generation service is still running,
+    // even if the state was reset to Idle by a soft-stop request.
+    val isGenerating = progressState != null || isServiceRunning
     val progressPercent = if (progressState != null) (progressState.progress * 100).toInt() else 0
     val hasProgressDetail = progressState != null && progressState.totalSteps > 0
     var genBatchIndex by remember { mutableIntStateOf(0) }
     var genBatchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var genGenerateTrigger by remember { mutableIntStateOf(0) }
 
+    // ---- Stop-click tracking for 3-click hard-kill ----
+    var stopClickCount by remember { mutableIntStateOf(0) }
+    var lastStopClickTime by remember { mutableStateOf(0L) }
+
     // ---- Import dialog state ----
     var showCustomModelDialog by remember { mutableStateOf(false) }
     var showCustomNpuModelDialog by remember { mutableStateOf(false) }
+    var showCustomUpscaleModelDialog by remember { mutableStateOf(false) }
     var importingModels by remember { mutableStateOf<List<ImportingModelState>>(emptyList()) }
+
+    // ---- Rename / Delete dialog state ----
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    var renameText by remember { mutableStateOf("") }
 
     // ---- Upscale model state ----
     val upscaleBackendState by UpscaleBackendManager.state.collectAsState()
@@ -432,6 +448,156 @@ private fun AppContent() {
         )
     }
 
+    // Dialog: custom upscale model import
+    if (showCustomUpscaleModelDialog) {
+        CustomUpscaleModelDialog(
+            context = context,
+            onDismiss = { showCustomUpscaleModelDialog = false },
+            onModelAdded = { modelName, fileUri ->
+                showCustomUpscaleModelDialog = false
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            val modelId = modelName.replace(" ", "")
+                            val modelDir = File(Model.getModelsDir(context), modelId)
+                            if (modelDir.exists()) {
+                                modelDir.deleteRecursively()
+                            }
+                            modelDir.mkdirs()
+
+                            // Copy the .bin file
+                            val inputStream = context.contentResolver.openInputStream(fileUri)
+                                ?: throw Exception("Cannot open file")
+                            val binFile = File(modelDir, "$modelId.bin")
+                            inputStream.use { input ->
+                                binFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+
+                            // Create marker file
+                            File(modelDir, "upscaler_custom").createNewFile()
+                        }
+                        modelRefreshVersion++
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.upscale_file_selected)
+                            )
+                        }
+                    } catch (e: Exception) {
+                        scope.launch {
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.error_download_failed, e.message ?: "")
+                            )
+                        }
+                    }
+                }
+            },
+        )
+    }
+
+    // Dialog: rename model
+    if (showRenameDialog) {
+        val model = remember(selectedModelId) {
+            modelRepository.models.find { it.id == selectedModelId }
+        }
+        val title = stringResource(R.string.rename_model)
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text(title) },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text(stringResource(R.string.custom_model_name)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val newName = renameText.trim()
+                        if (newName.isNotEmpty() && model != null) {
+                            val success = model.renameModel(context, newName)
+                            if (success) {
+                                modelRepository.refreshAllModels()
+                                modelRefreshVersion++
+                                // Update selectedModelId to the new ID
+                                selectedModelId = newName.replace(" ", "")
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        stringResource(R.string.rename_success)
+                                    )
+                                }
+                            } else {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        stringResource(R.string.rename_failed, "directory error")
+                                    )
+                                }
+                            }
+                        }
+                        showRenameDialog = false
+                    },
+                    enabled = renameText.trim().isNotEmpty(),
+                ) { Text(stringResource(R.string.save)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    // Dialog: delete model confirmation
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.delete_model)) },
+            text = { Text(stringResource(R.string.delete_model_confirm_single)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        val model = modelRepository.models.find { it.id == selectedModelId }
+                        if (model != null) {
+                            // Unload if this model is currently loaded
+                            if (isModelLoaded &&
+                                (backendState as? BackendService.BackendState.Running)?.modelId == model.id
+                            ) {
+                                unloadModel()
+                            }
+                            val success = model.deleteModel(context)
+                            if (success) {
+                                if (selectedModelId == model.id) selectedModelId = null
+                                modelRepository.refreshAllModels()
+                                modelRefreshVersion++
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        stringResource(R.string.delete_success)
+                                    )
+                                }
+                            } else {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        stringResource(R.string.delete_failed)
+                                    )
+                                }
+                            }
+                        }
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
     // ---- Drawer content ----
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -474,6 +640,13 @@ private fun AppContent() {
                         onUnloadModel = { unloadModel() },
                         onImportModel = { showCustomModelDialog = true },
                         onImportNpuModel = { showCustomNpuModelDialog = true },
+                        onImportUpscaleModel = { showCustomUpscaleModelDialog = true },
+                        onRenameModel = {
+                            val model = modelRepository.models.find { it.id == selectedModelId }
+                            renameText = model?.name ?: selectedModelId ?: ""
+                            showRenameDialog = true
+                        },
+                        onDeleteModel = { showDeleteConfirm = true },
                     )
                     BottomTab.Generate -> GenerateTopBar(
                         drawerState = drawerState,
@@ -486,11 +659,32 @@ private fun AppContent() {
                         hasProgressDetail = hasProgressDetail,
                         onGenerate = { genGenerateTrigger++ },
                         onStop = {
+                            val now = System.currentTimeMillis()
+                            // Reset counter if more than 3 seconds since last click
+                            if (now - lastStopClickTime > 3000) stopClickCount = 0
+                            stopClickCount++
+                            lastStopClickTime = now
+
+                            // 1. Always cancel batch job — prevents frontend from
+                            //    sending any new HTTP requests.
                             genBatchJob?.cancel()
                             genBatchJob = null
                             genBatchIndex = 0
+
+                            // 2. Always send soft-stop broadcast
                             context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
                             BackgroundGenerationService.resetState()
+
+                            // 3. On 3rd click: hard-kill the backend process
+                            if (stopClickCount >= 3) {
+                                android.util.Log.w("MainActivity",
+                                    "Hard stopping backend after $stopClickCount stop clicks")
+                                stopClickCount = 0
+                                // Stop the backend service which calls proc.destroyForcibly()
+                                context.stopService(Intent(context, BackendService::class.java).apply {
+                                    action = BackendService.ACTION_STOP
+                                })
+                            }
                         },
                     )
                     BottomTab.Upscale -> UpscaleTopBar(
@@ -583,6 +777,9 @@ private fun ModelsTopBar(
     onUnloadModel: () -> Unit,
     onImportModel: () -> Unit = {},
     onImportNpuModel: () -> Unit = {},
+    onImportUpscaleModel: () -> Unit = {},
+    onRenameModel: () -> Unit = {},
+    onDeleteModel: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var showImportMenu by remember { mutableStateOf(false) }
@@ -594,7 +791,9 @@ private fun ModelsTopBar(
             }
         },
         actions = {
-            if (selectedModelId != null) {
+            // Stop model service: always visible when a model is loaded,
+            // regardless of whether a model card is selected.
+            if (isModelLoaded) {
                 if (isModelLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier
@@ -602,18 +801,31 @@ private fun ModelsTopBar(
                             .size(24.dp),
                         strokeWidth = 2.dp,
                     )
-                } else if (isModelLoaded) {
+                } else {
                     TextButton(onClick = onUnloadModel) {
                         Icon(Icons.Default.Stop, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(stringResource(R.string.unload_model))
                     }
-                } else {
-                    TextButton(onClick = { onLoadModel(selectedModelId) }) {
-                        Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.load_model))
-                    }
+                }
+            }
+
+            // Start model service: requires a selected model
+            if (selectedModelId != null && !isModelLoaded && !isModelLoading) {
+                TextButton(onClick = { onLoadModel(selectedModelId) }) {
+                    Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.load_model))
+                }
+            }
+
+            // Rename (pencil) and Delete (trash) — require a selected model
+            if (selectedModelId != null) {
+                IconButton(onClick = onDeleteModel) {
+                    Icon(Icons.Default.Delete, stringResource(R.string.delete_model))
+                }
+                IconButton(onClick = onRenameModel) {
+                    Icon(Icons.Default.Edit, stringResource(R.string.rename_model))
                 }
             }
 
@@ -647,6 +859,16 @@ private fun ModelsTopBar(
                             },
                         )
                     }
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.import_upscale_model)) },
+                        onClick = {
+                            showImportMenu = false
+                            onImportUpscaleModel()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Hd, contentDescription = null)
+                        },
+                    )
                 }
             }
         },
@@ -868,7 +1090,7 @@ private fun ModelListTab(
     persistedUpscalerId: String? = null,
 ) {
     val context = LocalContext.current
-    val upscalerRepository = remember { UpscalerRepository(context) }
+    val upscalerRepository = remember(refreshVersion) { UpscalerRepository(context) }
     val downloadState by ModelDownloadService.downloadState.collectAsState()
 
     // Only show custom (imported) models
@@ -877,7 +1099,7 @@ private fun ModelListTab(
     }
 
     val hasAnyContent = customModels.isNotEmpty() || importingModels.isNotEmpty() ||
-        upscalerRepository.upscalers.any { !it.isDownloaded || it.isDownloaded }
+        upscalerRepository.upscalers.any { it.isDownloaded }
 
     if (!hasAnyContent) {
         Box(
@@ -925,49 +1147,36 @@ private fun ModelListTab(
                 )
             }
 
-            // ---- Upscale Models Section ----
-            item(key = "upscale_header") {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                Text(
-                    stringResource(R.string.upscale_models_section),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(vertical = 4.dp),
-                )
+            // ---- Upscale Models Section (downloaded/imported only) ----
+            val downloadedUpscalers = remember(upscalerRepository.upscalers) {
+                upscalerRepository.upscalers.filter { it.isDownloaded }
             }
+            if (downloadedUpscalers.isNotEmpty()) {
+                item(key = "upscale_header") {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    Text(
+                        stringResource(R.string.upscale_models_section),
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(vertical = 4.dp),
+                    )
+                }
 
-            items(upscalerRepository.upscalers, key = { "upscaler_${it.id}" }) { upscaler ->
-                val isThisUpscalerLoaded = isUpscaleModelLoaded &&
-                    UpscaleBackendManager.loadedUpscalerId == upscaler.id
+                items(downloadedUpscalers, key = { "upscaler_${it.id}" }) { upscaler ->
+                    val isThisUpscalerLoaded = isUpscaleModelLoaded &&
+                        UpscaleBackendManager.loadedUpscalerId == upscaler.id
 
-                UpscaleModelCardInline(
-                    upscaler = upscaler,
-                    isLoaded = isThisUpscalerLoaded,
-                    isSelected = persistedUpscalerId == upscaler.id && !isThisUpscalerLoaded,
-                    isDownloading = downloadState is ModelDownloadService.DownloadState.Downloading &&
-                        (downloadState as ModelDownloadService.DownloadState.Downloading).modelId == upscaler.id,
-                    downloadProgress = when (downloadState) {
-                        is ModelDownloadService.DownloadState.Downloading -> {
-                            val ds = downloadState as ModelDownloadService.DownloadState.Downloading
-                            if (ds.modelId == upscaler.id) DownloadProgress(ds.progress, ds.downloadedBytes, ds.totalBytes) else null
-                        }
-                        else -> null
-                    },
-                    onSelect = {
-                        context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE).edit {
-                            putString("upscaler_standalone_selected_upscaler", upscaler.id)
-                        }
-                    },
-                    onLoad = { onLoadUpscaleModel(upscaler.id) },
-                    onUnload = { onUnloadUpscaleModel() },
-                    onDownload = { upscaler.startDownload(context) },
-                )
-
-                // Handle download completion
-                LaunchedEffect(downloadState) {
-                    if (downloadState is ModelDownloadService.DownloadState.Success &&
-                        (downloadState as ModelDownloadService.DownloadState.Success).modelId == upscaler.id) {
-                        upscalerRepository.refreshUpscalerState(upscaler.id)
-                    }
+                    UpscaleModelCardInline(
+                        upscaler = upscaler,
+                        isLoaded = isThisUpscalerLoaded,
+                        isSelected = persistedUpscalerId == upscaler.id && !isThisUpscalerLoaded,
+                        onSelect = {
+                            context.getSharedPreferences("upscaler_prefs", Context.MODE_PRIVATE).edit {
+                                putString("upscaler_standalone_selected_upscaler", upscaler.id)
+                            }
+                        },
+                        onLoad = { onLoadUpscaleModel(upscaler.id) },
+                        onUnload = { onUnloadUpscaleModel() },
+                    )
                 }
             }
         }
@@ -979,12 +1188,9 @@ private fun UpscaleModelCardInline(
     upscaler: UpscalerModel,
     isLoaded: Boolean,
     isSelected: Boolean,
-    isDownloading: Boolean,
-    downloadProgress: DownloadProgress?,
     onSelect: () -> Unit,
     onLoad: () -> Unit,
     onUnload: () -> Unit,
-    onDownload: () -> Unit,
 ) {
     Card(
         onClick = onSelect,
@@ -1002,73 +1208,41 @@ private fun UpscaleModelCardInline(
             else -> null
         },
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = upscaler.name,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    text = upscaler.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (isLoaded) {
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        text = upscaler.name,
-                        style = MaterialTheme.typography.titleMedium,
+                        text = stringResource(R.string.model_loaded),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
                     )
-                    Text(
-                        text = upscaler.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (isLoaded) {
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = stringResource(R.string.model_loaded),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                }
-
-                when {
-                    isDownloading -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    }
-                    !upscaler.isDownloaded -> {
-                        FilledTonalButton(onClick = onDownload) {
-                            Icon(
-                                imageVector = Icons.Default.Download,
-                                contentDescription = stringResource(R.string.download),
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(stringResource(R.string.download))
-                        }
-                    }
-                    isLoaded -> {
-                        Button(onClick = onUnload) {
-                            Text(stringResource(R.string.unload_upscale_model))
-                        }
-                    }
-                    else -> {
-                        Button(onClick = onLoad) {
-                            Text(stringResource(R.string.load_upscale_model))
-                        }
-                    }
                 }
             }
 
-            if (isDownloading && downloadProgress != null) {
-                LinearProgressIndicator(
-                    progress = downloadProgress.progress,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 16.dp),
-                )
+            if (isLoaded) {
+                Button(onClick = onUnload) {
+                    Text(stringResource(R.string.unload_upscale_model))
+                }
+            } else {
+                Button(onClick = onLoad) {
+                    Text(stringResource(R.string.load_upscale_model))
+                }
             }
         }
     }
@@ -1157,6 +1331,7 @@ private fun ModelSelectCard(
     )
 
     ElevatedCard(
+        onClick = onSelect,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.elevatedCardColors(containerColor = backgroundColor),
         shape = MaterialTheme.shapes.large,
@@ -1192,10 +1367,9 @@ private fun ModelSelectCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Switch(
+            Checkbox(
                 checked = isSelected,
                 onCheckedChange = { onSelect() },
-                modifier = Modifier.padding(end = 8.dp),
             )
         }
     }

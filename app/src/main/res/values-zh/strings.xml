@@ -31,6 +31,14 @@
     <string name="tag_import_failed">导入失败</string>
     <string name="sdxl_lowram">SDXL 低内存模式</string>
     <string name="sdxl_lowram_hint">仅 SDXL 生效：按需加载每个模型，用完即释放。小于 16GB 内存的设备建议开启。开启后将禁用生成过程预览。</string>
+    <string name="generation_timeout">生成超时</string>
+    <string name="generation_timeout_hint">单张图片生成的最大等待时间。较慢的模型或高分辨率需延长。当前：%d 秒</string>
+    <string name="bitmap_consumed_timeout">位图读取超时</string>
+    <string name="bitmap_consumed_timeout_hint">生成完成后，UI 读取位图的最大等待时间。当前：%d 秒</string>
+    <string name="health_check_retry_interval">健康检查重试间隔</string>
+    <string name="health_check_retry_interval_hint">后端健康检查重试之间的等待时间。当前：%d 秒</string>
+    <string name="health_check_max_failures">健康检查最大失败次数</string>
+    <string name="health_check_max_failures_hint">连续健康检查失败多少次后自动重启后端服务。当前：%d 次</string>
     <string name="captured_logs_title">已收集的日志</string>
     <string name="log_saved">已保存到 %1$s</string>
     <string name="log_save_failed">日志保存失败</string>
@@ -170,6 +178,7 @@
     <string name="image_size">图像尺寸: %1$dx%2$d</string>
     <string name="random_seed">随机种子 (可选)</string>
     <string name="use_last_seed">使用上次的种子 (%s)</string>
+    <string name="batch_count_label">批次数量</string>
     <string name="batch_count">批次数量: %d</string>
     <string name="reproduce">复制</string>
     <string name="reproduce_params_title">复用参数</string>
@@ -359,17 +368,36 @@
     <!-- Bottom Navigation -->
     <string name="nav_models">模型</string>
     <string name="nav_generate">生成</string>
-    <string name="nav_upscale">高清</string>
+    <string name="nav_upscale">放大</string>
     <string name="nav_browse">图库</string>
 
     <string name="no_model_loaded">未加载模型</string>
     <string name="generate_model_not_loaded">生成模型未加载</string>
-    <string name="upscale_model_not_loaded">高清模型未加载</string>
+    <string name="upscale_model_not_loaded">放大模型未加载</string>
     <string name="no_model_loaded_hint">请先在\"模型\"标签页中加载一个模型</string>
-    <string name="load_upscale_model">加载高清模型</string>
-    <string name="unload_upscale_model">卸载高清模型</string>
-    <string name="upscale_models_section">高清模型</string>
+    <string name="load_upscale_model">加载放大模型</string>
+    <string name="unload_upscale_model">卸载放大模型</string>
+    <string name="upscale_models_section">放大模型</string>
+    <string name="load_model">启动模型服务</string>
+    <string name="unload_model">停止模型服务</string>
+    <string name="loading_model_label">加载模型中…</string>
+    <string name="model_loaded">模型已加载</string>
+    <string name="model_unloaded">模型已卸载</string>
+    <string name="model_load_failed">模型加载失败: %s</string>
+    <string name="select_model_hint">点击模型选中，然后启动服务</string>
+    <string name="rename_model">重命名模型</string>
+    <string name="rename_model_hint">输入新的模型名称</string>
+    <string name="rename_success">模型已重命名</string>
+    <string name="rename_failed">重命名失败: %s</string>
+    <string name="delete_model_confirm_single">确定要删除此模型吗？此操作无法撤销。</string>
     <string name="stop_generation">停止生成</string>
     <string name="model_type_generation">生成</string>
-    <string name="model_type_upscale">高清</string>
+    <string name="model_type_upscale">放大</string>
+    <string name="import_model">导入模型文件</string>
+    <string name="import_npu_model">导入NPU模型zip</string>
+    <string name="import_upscale_model">导入放大模型</string>
+    <string name="add_custom_upscale_model">添加放大模型</string>
+    <string name="select_upscale_file">选择放大模型文件 (.bin)</string>
+    <string name="upscale_file_selected">放大模型文件已选择</string>
+    <string name="custom_upscale_model_name_hint">输入放大模型名称</string>
 </resources>

@@ -159,6 +159,30 @@ data class Model(
         false
     }
 
+    fun renameModel(context: Context, newName: String): Boolean = try {
+        val modelsDir = getModelsDir(context)
+        val oldDir = File(modelsDir, id)
+        val newId = newName.replace(" ", "")
+        val newDir = File(modelsDir, newId)
+
+        if (!oldDir.exists() || !oldDir.isDirectory) {
+            Log.e("Model", "Cannot rename: model directory does not exist for $id")
+            return false
+        }
+
+        if (newDir.exists()) {
+            Log.e("Model", "Cannot rename: target directory already exists $newId")
+            return false
+        }
+
+        val success = oldDir.renameTo(newDir)
+        Log.d("Model", "Rename model $id -> $newId: $success")
+        success
+    } catch (e: Exception) {
+        Log.e("Model", "Rename error: ${e.message}")
+        false
+    }
+
     companion object {
         private const val MODELS_DIR = "models"
 
@@ -264,10 +288,44 @@ class UpscalerRepository(private val context: Context) {
         val soc = getDeviceSoc()
         val suffix = Model.getChipsetSuffix(soc) ?: "min"
 
-        return listOf(
+        val builtIn = listOf(
             createAnimeUpscaler(suffix),
             createRealisticUpscaler(suffix),
         )
+        return builtIn + scanCustomUpscalers()
+    }
+
+    private fun scanCustomUpscalers(): List<UpscalerModel> {
+        val modelsDir = Model.getModelsDir(context)
+        val customUpscalers = mutableListOf<UpscalerModel>()
+
+        if (modelsDir.exists() && modelsDir.isDirectory) {
+            modelsDir.listFiles()?.forEach { dir ->
+                if (!dir.isDirectory) return@forEach
+
+                val modelId = dir.name
+                if (Model.isReservedModelId(modelId)) return@forEach
+
+                val customFile = File(dir, "upscaler_custom")
+                if (!customFile.exists()) return@forEach
+
+                // Find the first .bin file in the directory
+                val binFile = dir.listFiles()?.find { it.extension == "bin" }
+                if (binFile == null) return@forEach
+
+                customUpscalers.add(
+                    UpscalerModel(
+                        id = modelId,
+                        name = modelId,
+                        description = context.getString(R.string.custom_model),
+                        baseUrl = "",
+                        fileUri = "",
+                        isDownloaded = true,
+                    )
+                )
+            }
+        }
+        return customUpscalers
     }
 
     private fun createAnimeUpscaler(suffix: String): UpscalerModel {
@@ -706,6 +764,8 @@ class ModelRepository(private val context: Context) {
             // SD 1.5 CPU
             "anythingv5cpu", "qteamixcpu", "cuteyukimixcpu",
             "absoluterealitycpu", "chilloutmixcpu",
+            // Upscalers
+            "upscaler_anime", "upscaler_realistic",
         )
 
         fun isReservedModelId(id: String): Boolean = id in RESERVED_MODEL_IDS

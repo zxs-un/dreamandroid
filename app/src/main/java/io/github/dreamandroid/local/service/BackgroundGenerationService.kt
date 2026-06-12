@@ -37,9 +37,55 @@ class BackgroundGenerationService : Service() {
         // Retry configuration
         const val MAX_RETRIES = 3
         const val RETRY_DELAY_MS = 1500L
-        const val SERVICE_WAIT_TIMEOUT_MS = 8000L
-        const val BITMAP_CONSUMED_TIMEOUT_MS = 5000L
         const val BACKEND_HEALTH_CHECK_TIMEOUT_MS = 3000L
+
+        // Defaults — actual values read from SharedPreferences("app_prefs")
+        private const val DEFAULT_SERVICE_WAIT_S = 60
+        private const val DEFAULT_BITMAP_CONSUMED_S = 30
+        private const val DEFAULT_HEALTH_CHECK_RETRY_INTERVAL_S = 20
+        private const val DEFAULT_HEALTH_CHECK_MAX_FAILURES = 4
+
+        /**
+         * Read the timeout/interval values from user-configurable preferences.
+         * All values are stored in seconds and converted to milliseconds where needed.
+         */
+        fun getServiceWaitTimeoutMs(context: Context): Long =
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                .getInt("generation_timeout_s", DEFAULT_SERVICE_WAIT_S).toLong() * 1000
+
+        fun getBitmapConsumedTimeoutMs(context: Context): Long =
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                .getInt("bitmap_consumed_timeout_s", DEFAULT_BITMAP_CONSUMED_S).toLong() * 1000
+
+        fun getHealthCheckRetryIntervalMs(context: Context): Long =
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                .getInt("health_check_retry_interval_s", DEFAULT_HEALTH_CHECK_RETRY_INTERVAL_S).toLong() * 1000
+
+        fun getHealthCheckMaxFailures(context: Context): Int =
+            context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                .getInt("health_check_max_failures", DEFAULT_HEALTH_CHECK_MAX_FAILURES)
+
+        /**
+         * Shared OkHttpClient reused across all generation requests.
+         * A single connection pool avoids accumulation across batch iterations.
+         */
+        private val sharedClient: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(3600, TimeUnit.SECONDS)
+                .readTimeout(3600, TimeUnit.SECONDS)
+                .writeTimeout(3600, TimeUnit.SECONDS)
+                .callTimeout(3600, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                // Aggressively evict idle connections so the backend
+                // doesn't accumulate stale sockets across batch items.
+                .connectionPool(
+                    okhttp3.ConnectionPool(
+                        maxIdleConnections = 2,
+                        keepAliveDuration = 1, TimeUnit.SECONDS,
+                    ),
+                )
+                .build()
+        }
 
         private val _generationState = MutableStateFlow<GenerationState>(GenerationState.Idle)
         val generationState: StateFlow<GenerationState> = _generationState
@@ -49,10 +95,18 @@ class BackgroundGenerationService : Service() {
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning: StateFlow<Boolean> = _isServiceRunning
 
+        /**
+         * Flag indicating the user has requested a stop.
+         * The in-flight generation checks this to discard results and abort early.
+         */
+        private val _stopRequested = MutableStateFlow(false)
+
         /** Reset all state to a clean baseline. Atomic — always succeeds. */
         fun resetState() {
             _generationState.value = GenerationState.Idle
             _bitmapConsumed.value = false
+            // NOTE: _stopRequested is intentionally NOT cleared here —
+            // it is managed by the service lifecycle.
         }
 
         /**
@@ -107,6 +161,10 @@ class BackgroundGenerationService : Service() {
         }
     }
 
+    /** Reference to the in-flight OkHttp Call, used to cancel the HTTP request on stop. */
+    @Volatile
+    private var activeCall: okhttp3.Call? = null
+
     sealed class GenerationState {
         object Idle : GenerationState()
         /** Service has accepted the request and is preparing to send to backend. */
@@ -140,7 +198,11 @@ class BackgroundGenerationService : Service() {
 
         when (intent?.action) {
             ACTION_STOP -> {
-                Log.d("GenerationService", "service stopped")
+                Log.d("GenerationService", "service stopped by user")
+                _stopRequested.value = true
+                // Cancel the in-flight HTTP request immediately so the
+                // blocking readLine() throws an IOException and unwinds.
+                activeCall?.cancel()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -154,6 +216,9 @@ class BackgroundGenerationService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+
+        // Clear stop flag when a new generation is explicitly started
+        _stopRequested.value = false
 
         val negativePrompt = intent.getStringExtra("negative_prompt") ?: ""
         val steps = intent.getIntExtra("steps", 28)
@@ -264,6 +329,9 @@ class BackgroundGenerationService : Service() {
             if (!isActive) break
             if (attempt > 1) {
                 Log.w("BgGenService", "Retry attempt $attempt/$MAX_RETRIES after ${RETRY_DELAY_MS}ms")
+                // Evict stale connections before retrying so the backend
+                // sees a clean socket rather than a half-closed one.
+                sharedClient.connectionPool.evictAll()
                 updateState(GenerationState.Progress(0f)) // Signal retry to UI
                 delay(RETRY_DELAY_MS)
             }
@@ -345,20 +413,15 @@ class BackgroundGenerationService : Service() {
                 mask?.let { put("mask", it) }
             }
 
-            val client = OkHttpClient.Builder()
-                .connectTimeout(3600, TimeUnit.SECONDS)
-                .readTimeout(3600, TimeUnit.SECONDS)
-                .writeTimeout(3600, TimeUnit.SECONDS)
-                .callTimeout(3600, TimeUnit.SECONDS)
-                .retryOnConnectionFailure(true)
-                .build()
-
             val request = Request.Builder()
                 .url("http://localhost:8081/generate")
                 .post(jsonObject.toString().toRequestBody("application/json".toMediaTypeOrNull()))
                 .build()
 
-            client.newCall(request).execute().use { response ->
+            val call = sharedClient.newCall(request)
+            activeCall = call
+            try {
+            call.execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IOException(
                         this@BackgroundGenerationService.getString(
@@ -377,8 +440,9 @@ class BackgroundGenerationService : Service() {
                     val reader = BufferedReader(InputStreamReader(responseBody.byteStream()))
                     var messageCount = 0
 
-                    // Read line by line for efficiency
-                    while (isActive) {
+                    // Read line by line for efficiency.
+                    // Also check _stopRequested so we abort promptly on user stop.
+                    while (isActive && !_stopRequested.value) {
                         val readLineStart = System.currentTimeMillis()
                         val line = reader.readLine() ?: break
                         val readLineTime = System.currentTimeMillis() - readLineStart
@@ -435,6 +499,12 @@ class BackgroundGenerationService : Service() {
                                 }
 
                                 "complete" -> {
+                                    // Discard result if user requested stop
+                                    if (_stopRequested.value) {
+                                        Log.d("BgGenService", "Stop requested, discarding completed generation")
+                                        stopSelf()
+                                        return@withContext
+                                    }
                                     Log.d(
                                         "BgGenService",
                                         "=== Received complete message, parsing... ===",
@@ -519,11 +589,12 @@ class BackgroundGenerationService : Service() {
 
                                     // Wait for UI to consume the bitmap with timeout
                                     val waitStartTime = System.currentTimeMillis()
+                                    val bitmapTimeout = getBitmapConsumedTimeoutMs(applicationContext)
                                     while (!_bitmapConsumed.value && isActive) {
-                                        if (System.currentTimeMillis() - waitStartTime > BITMAP_CONSUMED_TIMEOUT_MS) {
+                                        if (System.currentTimeMillis() - waitStartTime > bitmapTimeout) {
                                             Log.w(
                                                 "BgGenService",
-                                                "Timeout waiting for bitmap consumption after ${BITMAP_CONSUMED_TIMEOUT_MS}ms",
+                                                "Timeout waiting for bitmap consumption after ${bitmapTimeout}ms",
                                             )
                                             break
                                         }
@@ -557,6 +628,8 @@ class BackgroundGenerationService : Service() {
             } catch (e: Exception) {
                 Log.e("BgGenService", "Unexpected generation error", e)
                 updateState(GenerationState.Error(e.message ?: "Unexpected error"))
+            } finally {
+                activeCall = null
             }
     }
 
@@ -622,6 +695,12 @@ class BackgroundGenerationService : Service() {
         // Zero-trust: force-reset any non-Idle state on destroy.
         // This ensures the next service start always begins from a clean baseline.
         forceResetIfStale()
+
+        // Clear the stop flag now that the service is fully destroyed
+        _stopRequested.value = false
+
+        // Evict idle connections so the next batch item gets a fresh socket.
+        sharedClient.connectionPool.evictAll()
 
         _isServiceRunning.value = false
         Log.d("GenerationService", "service destroyed, isServiceRunning set to false")

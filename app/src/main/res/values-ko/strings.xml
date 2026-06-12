@@ -170,6 +170,7 @@
     <string name="image_size">이미지 크기: %1$dx%2$d</string>
     <string name="random_seed">랜덤 시드(선택 사항)</string>
     <string name="use_last_seed">마지막 시드 사용 (%s)</string>
+    <string name="batch_count_label">배치 수</string>
     <string name="batch_count">배치 수: %d</string>
     <string name="reproduce">재사용</string>
     <string name="reproduce_params_title">파라미터 재사용</string>
@@ -360,4 +361,21 @@
     <string name="nav_browse">갤러리</string>
 
     <string name="stop_generation">생성 중지</string>
+    <string name="no_model_loaded">모델이 로드되지 않음</string>
+    <string name="generate_model_not_loaded">생성 모델이 로드되지 않음</string>
+    <string name="upscale_model_not_loaded">업스케일 모델이 로드되지 않음</string>
+    <string name="no_model_loaded_hint">먼저 \"모델\" 탭에서 모델을 로드하세요</string>
+    <string name="load_upscale_model">업스케일 모델 로드</string>
+    <string name="unload_upscale_model">업스케일 모델 언로드</string>
+    <string name="upscale_models_section">업스케일 모델</string>
+    <string name="select_model_hint">모델을 선택한 후 로드를 클릭하세요</string>
+    <string name="import_model">모델 파일 가져오기</string>
+    <string name="import_npu_model">NPU 모델 ZIP 가져오기</string>
+    <string name="import_upscale_model">업스케일 모델 가져오기</string>
+    <string name="add_custom_upscale_model">업스케일 모델 추가</string>
+    <string name="select_upscale_file">업스케일 모델 파일 선택 (.bin)</string>
+    <string name="upscale_file_selected">업스케일 모델 파일 선택됨</string>
+    <string name="custom_upscale_model_name_hint">업스케일 모델 이름 입력</string>
+    <string name="model_type_generation">생성</string>
+    <string name="model_type_upscale">업스케일</string>
 </resources>

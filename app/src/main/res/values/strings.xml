@@ -33,6 +33,14 @@
     <string name="tag_import_failed">Import failed</string>
     <string name="sdxl_lowram">SDXL low RAM mode</string>
     <string name="sdxl_lowram_hint">For SDXL only: load each model on demand and free it after use. Required on devices with less than 16GB RAM. Disables in-progress preview.</string>
+    <string name="generation_timeout">Generation Timeout</string>
+    <string name="generation_timeout_hint">Maximum time to wait for a single image generation. Increase for slower models or higher resolution. Current: %d seconds</string>
+    <string name="bitmap_consumed_timeout">Bitmap Consumption Timeout</string>
+    <string name="bitmap_consumed_timeout_hint">Maximum time to wait for the UI to consume the generated bitmap after completion. Current: %d seconds</string>
+    <string name="health_check_retry_interval">Health Check Retry Interval</string>
+    <string name="health_check_retry_interval_hint">Wait time between backend health check retries. Current: %d seconds</string>
+    <string name="health_check_max_failures">Health Check Max Failures</string>
+    <string name="health_check_max_failures_hint">Number of consecutive health check failures before auto-restarting the backend service. Current: %d</string>
     <string name="captured_logs_title">Captured logs</string>
     <string name="log_saved">Saved to %1$s</string>
     <string name="log_save_failed">Failed to save log</string>
@@ -179,6 +187,7 @@
     <string name="image_size">Image Size: %1$dx%2$d</string>
     <string name="random_seed">Random Seed (Optional)</string>
     <string name="use_last_seed">Use Last Seed (%s)</string>
+    <string name="batch_count_label">Batch Count</string>
     <string name="batch_count">Batch Count: %d</string>
     <string name="reproduce">Reproduce</string>
     <string name="reproduce_params_title">Reproduce Parameters</string>
@@ -373,8 +382,8 @@
     <string name="nav_browse">Gallery</string>
 
     <!-- Model Management -->
-    <string name="load_model">Load model</string>
-    <string name="unload_model">Unload model</string>
+    <string name="load_model">Start model service</string>
+    <string name="unload_model">Stop model service</string>
     <string name="loading_model_label">Loading model…</string>
     <string name="model_loaded">Model loaded</string>
     <string name="model_unloaded">Model unloaded</string>
@@ -387,9 +396,19 @@
     <string name="load_upscale_model">Load Upscale Model</string>
     <string name="unload_upscale_model">Unload Upscale Model</string>
     <string name="upscale_models_section">Upscale Models</string>
-    <string name="select_model_hint">Tap switch to select a model, then click Load</string>
+    <string name="select_model_hint">Tap to select a model, then start the service</string>
+    <string name="rename_model">Rename Model</string>
+    <string name="rename_model_hint">Enter new model name</string>
+    <string name="rename_success">Model renamed</string>
+    <string name="rename_failed">Rename failed: %s</string>
+    <string name="delete_model_confirm_single">Are you sure to delete this model? This action cannot be undone.</string>
     <string name="import_model">Import model file</string>
     <string name="import_npu_model">Import NPU model zip</string>
+    <string name="import_upscale_model">Import Upscale Model</string>
+    <string name="add_custom_upscale_model">Add Upscale Model</string>
+    <string name="select_upscale_file">Select Upscale Model File (.bin)</string>
+    <string name="upscale_file_selected">Upscale Model File Selected</string>
+    <string name="custom_upscale_model_name_hint">Enter upscale model name</string>
     <string name="model_type_generation">Generation</string>
     <string name="model_type_upscale">Upscale</string>
 
