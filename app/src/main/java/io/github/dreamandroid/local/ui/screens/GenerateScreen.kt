@@ -417,38 +417,76 @@ fun GenerateScreen(
 
             // ---- Width / Height (screen-level, below negative prompt) ----/
             Spacer(Modifier.height(8.dp))
+
+            var widthText by remember(width) { mutableStateOf(width.toString()) }
+            var heightText by remember(height) { mutableStateOf(height.toString()) }
+            var widthFocused by remember { mutableStateOf(false) }
+            var heightFocused by remember { mutableStateOf(false) }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 OutlinedTextField(
-                    value = width.toString(),
-                    onValueChange = { text ->
-                        val num = text.filter { it.isDigit() }.toIntOrNull()
-                        if (num != null && num in 64..4096) {
-                            onWidthChange(num)
+                    value = widthText,
+                    onValueChange = { newText ->
+                        // Allow free typing; clamp only on focus loss
+                        val digits = newText.filter { it.isDigit() }
+                        widthText = digits
+                        val num = digits.toIntOrNull()
+                        if (num != null && !widthFocused) {
+                            val clamped = num.coerceIn(64, 4096)
+                            widthText = clamped.toString()
+                            onWidthChange(clamped)
                             saveAllFields()
                         }
                     },
                     label = { Text("W") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { state ->
+                            widthFocused = state.isFocused
+                            if (!state.isFocused) {
+                                val num = widthText.toIntOrNull() ?: width
+                                val clamped = num.coerceIn(64, 4096)
+                                widthText = clamped.toString()
+                                onWidthChange(clamped)
+                                saveAllFields()
+                            }
+                        },
                     shape = MaterialTheme.shapes.medium,
                 )
                 OutlinedTextField(
-                    value = height.toString(),
-                    onValueChange = { text ->
-                        val num = text.filter { it.isDigit() }.toIntOrNull()
-                        if (num != null && num in 64..4096) {
-                            onHeightChange(num)
+                    value = heightText,
+                    onValueChange = { newText ->
+                        // Allow free typing; clamp only on focus loss
+                        val digits = newText.filter { it.isDigit() }
+                        heightText = digits
+                        val num = digits.toIntOrNull()
+                        if (num != null && !heightFocused) {
+                            val clamped = num.coerceIn(64, 4096)
+                            heightText = clamped.toString()
+                            onHeightChange(clamped)
                             saveAllFields()
                         }
                     },
                     label = { Text("H") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { state ->
+                            heightFocused = state.isFocused
+                            if (!state.isFocused) {
+                                val num = heightText.toIntOrNull() ?: height
+                                val clamped = num.coerceIn(64, 4096)
+                                heightText = clamped.toString()
+                                onHeightChange(clamped)
+                                saveAllFields()
+                            }
+                        },
                     shape = MaterialTheme.shapes.medium,
                 )
             }
