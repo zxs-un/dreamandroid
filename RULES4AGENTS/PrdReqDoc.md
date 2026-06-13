@@ -198,7 +198,7 @@ data: {"type":"error","message":"<error description>"}
 | 4 | Upscale | `upscale` | ImageSearch (放大镜图片) | 超分辨率 |
 | 5 | Browse | `browse` | PhotoLibrary (图库) | 图片画廊 |
 
-每个 Tab 配有独立 TopAppBar，左侧菜单按钮打开设置抽屉。
+每个 Tab 配有独立 TopAppBar，左侧菜单按钮打开导航抽屉（Navigation Drawer），设置是其中的一个条目。
 
 ---
 
@@ -263,7 +263,7 @@ data: {"type":"error","message":"<error description>"}
 
 #### 4.2.4 TopAppBar 操作
 
-- Menu: 打开设置抽屉
+- Menu: 打开导航抽屉
 - Load Model 按钮 (模型已选且未加载时显示)
 - Unload Model 按钮 (模型已加载时显示)
 - Loading 进度指示器 (模型加载中)
@@ -523,18 +523,31 @@ data: {"type":"error","message":"<error description>"}
 
 ---
 
-## 7. 用户配置 (Settings Drawer)
+## 7. 导航抽屉 (Navigation Drawer)
+
+左侧菜单按钮打开导航抽屉，当前包含 2 个条目，后续可追加更多条目。
+
+### 7.1 设置 (Settings)
+
+整体应用设置：
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
 | Dynamic Color | Material You 动态取色 | 开 |
 | Dark Mode | System / Light / Dark | System |
+| OLED Pure Black | OLED 全黑模式 | 关 |
 | Health Check Retry Interval | 健康检查重试间隔 (秒) | 20 |
 | Health Check Max Failures | 最大连续失败次数 | 4 |
 | HuggingFace Base URL | 模型下载地址 | `https://huggingface.co/` |
 | Listen on All Addresses | 后端监听所有地址 | 否 |
 | Show Diffusion Process | 显示扩散中间步骤 | 否 |
 | Show Diffusion Stride | 中间步骤步长 | 1 |
+
+### 7.2 关于 (About)
+
+关于本软件信息（版本号、许可证、开源声明等）。
+
+> 导航抽屉条目可灵活扩展，未来可按需追加其他条目（如帮助、反馈等）。
 
 ---
 
