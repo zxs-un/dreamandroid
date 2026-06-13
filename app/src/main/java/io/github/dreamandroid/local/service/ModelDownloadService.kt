@@ -10,8 +10,8 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.dreamandroid.local.R
 import java.io.File
+import java.time.Duration
 import java.util.zip.ZipInputStream
-import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -32,8 +32,8 @@ class ModelDownloadService : Service() {
     }
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(30.seconds)
-        .readTimeout(30.seconds)
+        .connectTimeout(Duration.ofSeconds(30))
+        .readTimeout(Duration.ofSeconds(30))
         .build()
 
     companion object {

@@ -16,7 +16,7 @@ import java.io.File
 import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
-import kotlin.time.Duration.Companion.seconds
+import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -65,8 +65,8 @@ suspend fun performUpscale(context: Context, bitmap: Bitmap, upscalerId: String)
 
     // Send RGB binary data to local upscale backend via OkHttp
     val client = OkHttpClient.Builder()
-        .connectTimeout(300.seconds) // 5 minutes
-        .readTimeout(300.seconds)
+        .connectTimeout(Duration.ofSeconds(300)) // 5 minutes
+        .readTimeout(Duration.ofSeconds(300))
         .build()
 
     val requestBody = rgbBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
@@ -162,9 +162,9 @@ suspend fun reportImage(
             }
 
             val client = OkHttpClient.Builder()
-                .connectTimeout(30.seconds)
-                .writeTimeout(60.seconds)
-                .readTimeout(30.seconds)
+                .connectTimeout(Duration.ofSeconds(30))
+                .writeTimeout(Duration.ofSeconds(60))
+                .readTimeout(Duration.ofSeconds(30))
                 .build()
 
             val requestBody = jsonObject.toString()

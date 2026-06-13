@@ -58,15 +58,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-import kotlin.time.Duration.Companion.seconds
+import java.time.Duration
 
 private data class GenerateTokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
 
 private val generateScreenTokenizeClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
-        .connectTimeout(2.seconds)
-        .readTimeout(5.seconds)
-        .writeTimeout(5.seconds)
+        .connectTimeout(Duration.ofSeconds(2))
+        .readTimeout(Duration.ofSeconds(5))
+        .writeTimeout(Duration.ofSeconds(5))
         .build()
 }
 

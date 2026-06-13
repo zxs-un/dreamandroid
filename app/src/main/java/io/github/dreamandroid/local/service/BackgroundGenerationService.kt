@@ -13,9 +13,9 @@ import androidx.core.graphics.createBitmap
 import io.github.dreamandroid.local.R
 import java.io.File
 import java.io.IOException
+import java.time.Duration
 import java.util.Base64
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.Duration.Companion.seconds
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,17 +70,18 @@ class BackgroundGenerationService : Service() {
          */
         private val sharedClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
-                .connectTimeout(3600.seconds)
-                .readTimeout(3600.seconds)
-                .writeTimeout(3600.seconds)
-                .callTimeout(3600.seconds)
+                .connectTimeout(Duration.ofSeconds(3600))
+                .readTimeout(Duration.ofSeconds(3600))
+                .writeTimeout(Duration.ofSeconds(3600))
+                .callTimeout(Duration.ofSeconds(3600))
                 .retryOnConnectionFailure(true)
                 // Aggressively evict idle connections so the backend
                 // doesn't accumulate stale sockets across batch items.
                 .connectionPool(
                     okhttp3.ConnectionPool(
                         maxIdleConnections = 2,
-                        keepAliveDuration = 1.seconds,
+                        keepAliveDuration = 1,
+                        timeUnit = TimeUnit.SECONDS,
                     ),
                 )
                 .build()
@@ -143,8 +144,8 @@ class BackgroundGenerationService : Service() {
         suspend fun checkBackendHealth(): Boolean = withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient.Builder()
-                    .connectTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS.milliseconds)
-                    .readTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS.milliseconds)
+                    .connectTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
+                    .readTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
                     .build()
                 val request = Request.Builder()
                     .url("http://localhost:8081/health")
