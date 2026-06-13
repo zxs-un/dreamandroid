@@ -3,6 +3,8 @@ package io.github.dreamandroid.local.service.backend
 import android.content.Context
 import android.util.Log
 import io.github.dreamandroid.local.core.error.AppError
+import io.github.dreamandroid.local.core.functional.healthCheck
+import io.github.dreamandroid.local.core.functional.retryOrFalse
 import io.github.dreamandroid.local.core.model.DreamHubConstants
 import io.github.dreamandroid.local.core.model.GenerateParams
 import io.github.dreamandroid.local.data.Model
@@ -13,7 +15,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -195,32 +196,18 @@ class BackendManager(private val context: Context) {
     // ── Health Check ──
 
     suspend fun healthCheck(): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val request = Request.Builder()
-                .url("${DreamHubConstants.BASE_URL}/health")
-                .get()
-                .build()
-
-            val client = httpClient.newBuilder()
-                .readTimeout(DreamHubConstants.HEALTH_CHECK_TIMEOUT_S, TimeUnit.SECONDS)
-                .build()
-
-            client.newCall(request).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
-            false
-        }
+        healthCheck(
+            client = httpClient,
+            baseUrl = DreamHubConstants.BASE_URL,
+            connectTimeoutMs = DreamHubConstants.HEALTH_CHECK_TIMEOUT_S * 1000,
+            readTimeoutMs = DreamHubConstants.HEALTH_CHECK_TIMEOUT_S * 1000,
+        )
     }
 
     suspend fun healthCheckWithRetry(
         maxRetries: Int = DreamHubConstants.DEFAULT_HEALTH_CHECK_MAX_FAILURES,
         intervalSeconds: Long = DreamHubConstants.DEFAULT_HEALTH_CHECK_RETRY_INTERVAL_S
-    ): Boolean {
-        repeat(maxRetries) {
-            if (healthCheck()) return true
-            delay(intervalSeconds * 1000)
-        }
-        return false
-    }
+    ): Boolean = retryOrFalse(maxRetries, intervalSeconds * 1000) { healthCheck() }
 
     // ── Business Endpoints ──
 

@@ -9,8 +9,9 @@ import android.graphics.Bitmap
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import androidx.core.graphics.createBitmap
 import io.github.dreamandroid.local.R
+import io.github.dreamandroid.local.core.functional.healthCheck
+import io.github.dreamandroid.local.core.functional.rgbBytesToBitmap
 import java.io.File
 import java.io.IOException
 import java.time.Duration
@@ -142,22 +143,12 @@ class BackgroundGenerationService : Service() {
          * Returns true if the health check endpoint responds.
          */
         suspend fun checkBackendHealth(): Boolean = withContext(Dispatchers.IO) {
-            try {
-                val client = sharedClient.newBuilder()
-                    .connectTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
-                    .readTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
-                    .build()
-                val request = Request.Builder()
-                    .url("http://localhost:8081/health")
-                    .get()
-                    .build()
-                client.newCall(request).execute().use { response ->
-                    response.isSuccessful
-                }
-            } catch (e: Exception) {
-                Log.w("BgGenService", "Backend health check failed: ${e.message}")
-                false
-            }
+            healthCheck(
+                client = sharedClient,
+                baseUrl = "http://localhost:8081",
+                connectTimeoutMs = BACKEND_HEALTH_CHECK_TIMEOUT_MS,
+                readTimeoutMs = BACKEND_HEALTH_CHECK_TIMEOUT_MS,
+            )
         }
     }
 
@@ -469,21 +460,7 @@ class BackgroundGenerationService : Service() {
                                             // Progress previews are cropped to (effectiveWidth,
                                             // effectiveHeight) by the backend so the SDXL aspect-pad
                                             // path doesn't ship the 1024 canvas every step.
-                                            val pw = effectiveWidth
-                                            val ph = effectiveHeight
-                                            val pixels = IntArray(pw * ph)
-                                            for (i in 0 until pw * ph) {
-                                                val index = i * 3
-                                                if (index + 2 < imageBytes.size) {
-                                                    val r = imageBytes[index].toInt() and 0xFF
-                                                    val g = imageBytes[index + 1].toInt() and 0xFF
-                                                    val b = imageBytes[index + 2].toInt() and 0xFF
-                                                    pixels[i] =
-                                                        (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                                                }
-                                            }
-                                            bitmap = createBitmap(pw, ph)
-                                            bitmap.setPixels(pixels, 0, pw, 0, 0, pw, ph)
+                                            bitmap = rgbBytesToBitmap(imageBytes, effectiveWidth, effectiveHeight)
                                         } catch (e: Exception) {
                                             Log.e(
                                                 "BgGenService",
@@ -544,26 +521,7 @@ class BackgroundGenerationService : Service() {
 
                                     // 3. RGB conversion + Bitmap creation
                                     val bitmapStartTime = System.currentTimeMillis()
-                                    val bitmap = createBitmap(resultWidth, resultHeight)
-                                    val pixels = IntArray(resultWidth * resultHeight)
-
-                                    for (i in 0 until resultWidth * resultHeight) {
-                                        val index = i * 3
-                                        val r = imageBytes[index].toInt() and 0xFF
-                                        val g = imageBytes[index + 1].toInt() and 0xFF
-                                        val b = imageBytes[index + 2].toInt() and 0xFF
-                                        pixels[i] =
-                                            (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-                                    }
-                                    bitmap.setPixels(
-                                        pixels,
-                                        0,
-                                        resultWidth,
-                                        0,
-                                        0,
-                                        resultWidth,
-                                        resultHeight,
-                                    )
+                                    val bitmap = rgbBytesToBitmap(imageBytes, resultWidth, resultHeight)
                                     Log.d(
                                         "BgGenService",
                                         "RGB conversion + Bitmap creation took: ${System.currentTimeMillis() - bitmapStartTime}ms",

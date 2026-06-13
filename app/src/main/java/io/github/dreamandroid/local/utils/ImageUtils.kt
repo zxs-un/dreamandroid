@@ -10,6 +10,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import io.github.dreamandroid.local.DreamAndroidApplication
+import io.github.dreamandroid.local.core.functional.bitmapToRgbBytes
 import io.github.dreamandroid.local.data.Model
 import io.github.dreamandroid.local.ui.screens.GenerationParameters
 import java.io.ByteArrayOutputStream
@@ -47,18 +48,7 @@ suspend fun performUpscale(context: Context, bitmap: Bitmap, upscalerId: String)
 
     // Convert bitmap to RGB bytes
     val prepareStartTime = System.currentTimeMillis()
-    val width = bitmap.width
-    val height = bitmap.height
-    val pixels = IntArray(width * height)
-    bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
-
-    val rgbBytes = ByteArray(width * height * 3)
-    for (i in pixels.indices) {
-        val pixel = pixels[i]
-        rgbBytes[i * 3] = ((pixel shr 16) and 0xFF).toByte()
-        rgbBytes[i * 3 + 1] = ((pixel shr 8) and 0xFF).toByte()
-        rgbBytes[i * 3 + 2] = (pixel and 0xFF).toByte()
-    }
+    val (rgbBytes, width, height) = bitmapToRgbBytes(bitmap)
     Log.d(
         "UpscaleBinary",
         "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms",
