@@ -86,9 +86,7 @@ import io.github.dreamandroid.local.ui.theme.Motion
 import io.github.dreamandroid.local.ui.theme.ThemePreset
 import io.github.dreamandroid.local.ui.theme.scheme
 import io.github.dreamandroid.local.utils.LogCapture
-import java.io.BufferedOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.OutputStream
 import java.text.DecimalFormat
 import java.text.SimpleDateFormat
@@ -458,7 +456,7 @@ fun ModelListScreen(navController: NavController, modifier: Modifier = Modifier)
                                 )
                                 if (!dir.exists()) dir.mkdirs()
                                 val file = File(dir, filename)
-                                FileOutputStream(file).use { out ->
+                                file.outputStream().use { out ->
                                     out.write(capturedLogs.toByteArray(Charsets.UTF_8))
                                 }
                                 file.absolutePath
@@ -2914,7 +2912,7 @@ suspend fun extractNpuModel(
                             ) {
                                 val outputFile = File(modelDir, fileName)
 
-                                BufferedOutputStream(outputFile.outputStream()).use { outputStream ->
+                                outputFile.outputStream().buffered().use { outputStream ->
                                     val tracking = object : OutputStream() {
                                         override fun write(b: Int) {
                                             outputStream.write(b)

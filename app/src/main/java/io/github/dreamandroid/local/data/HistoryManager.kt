@@ -8,7 +8,6 @@ import io.github.dreamandroid.local.data.db.AppDatabase
 import io.github.dreamandroid.local.data.db.HistoryEntity
 import io.github.dreamandroid.local.ui.screens.GenerationParameters
 import java.io.File
-import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -82,7 +81,7 @@ class HistoryManager(private val context: Context) {
             val isUpscaled = upscalerId != null
             val ext = if (isUpscaled) "jpg" else "png"
             val imageFile = File(historyDir, "$timestamp.$ext")
-            FileOutputStream(imageFile).use { out ->
+            imageFile.outputStream().use { out ->
                 if (isUpscaled) {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
                 } else {

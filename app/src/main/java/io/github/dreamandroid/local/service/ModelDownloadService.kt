@@ -10,7 +10,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.github.dreamandroid.local.R
 import java.io.File
-import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
@@ -212,7 +211,7 @@ class ModelDownloadService : Service() {
             var downloadedBytes = 0L
             var lastUpdateTime = 0L
 
-            java.io.BufferedOutputStream(FileOutputStream(destFile)).use { output ->
+            destFile.outputStream().buffered().use { output ->
                 body.byteStream().buffered().use { input ->
                     val buffer = ByteArray(32 * 1024)
                     var bytes: Int
@@ -255,7 +254,7 @@ class ModelDownloadService : Service() {
                     if (fileName.isNotEmpty() && !fileName.startsWith(".") && !fileName.startsWith("__MACOSX")) {
                         val file = File(destDir, fileName)
 
-                        java.io.BufferedOutputStream(FileOutputStream(file)).use { output ->
+                        file.outputStream().buffered().use { output ->
                             zis.copyTo(output)
                         }
                     }

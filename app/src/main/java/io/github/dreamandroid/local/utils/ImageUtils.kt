@@ -13,7 +13,6 @@ import io.github.dreamandroid.local.data.Model
 import io.github.dreamandroid.local.ui.screens.GenerationParameters
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Base64
 import java.util.concurrent.atomic.AtomicLong
@@ -266,7 +265,7 @@ suspend fun saveImage(context: Context, bitmap: Bitmap, width: Int, height: Int,
 
                 val file = File(imagesDir, filename)
                 val compressStartTime = System.currentTimeMillis()
-                FileOutputStream(file).use { out ->
+                file.outputStream().use { out ->
                     bitmap.compress(format, quality, out)
                 }
                 Log.d(
@@ -349,7 +348,7 @@ suspend fun saveImageFromFile(context: Context, sourceFile: File, width: Int, he
                 if (!imagesDir.exists()) imagesDir.mkdirs()
                 val outFile = File(imagesDir, filename)
                 sourceFile.inputStream().use { input ->
-                    FileOutputStream(outFile).use { out -> input.copyTo(out) }
+                    outFile.outputStream().use { out -> input.copyTo(out) }
                 }
                 MediaScannerConnection.scanFile(
                     context,

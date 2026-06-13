@@ -4,14 +4,10 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
 import androidx.core.content.edit
-import java.io.BufferedInputStream
-import java.io.BufferedOutputStream
-import java.io.BufferedReader
 import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
@@ -209,7 +205,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
         val englishSet = HashSet<String>(estimated * 2)
 
         mainFile.inputStream().use { input ->
-            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).useLines { lines ->
+            input.reader().buffered().useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
                     if (line.isEmpty()) return@forEach
@@ -292,7 +288,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
         val estimated = prefs.getInt(KEY_TRANSLATION_LINES, 0).coerceAtLeast(16)
         val map = HashMap<String, String>(estimated * 2)
         translationFile.inputStream().use { input ->
-            BufferedReader(InputStreamReader(input, Charsets.UTF_8)).useLines { lines ->
+            input.reader().buffered().useLines { lines ->
                 lines.forEach { rawLine ->
                     val line = rawLine.trim()
                     if (line.isEmpty()) return@forEach
@@ -311,7 +307,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
     private fun loadEntriesFromCache(): Pair<List<TagEntry>, LongArray>? {
         if (!cacheFile.exists()) return null
         return runCatching {
-            DataInputStream(BufferedInputStream(cacheFile.inputStream())).use { input ->
+            DataInputStream(cacheFile.inputStream().buffered()).use { input ->
                 if (input.readInt() != CACHE_MAGIC) return@use null
                 if (input.readInt() != CACHE_VERSION) return@use null
                 val cachedMainSize = input.readLong()
@@ -384,7 +380,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
 
     private fun saveEntriesToCache(entries: List<TagEntry>, englishBitmaps: LongArray) {
         runCatching {
-            DataOutputStream(BufferedOutputStream(cacheFile.outputStream())).use { output ->
+            DataOutputStream(cacheFile.outputStream().buffered()).use { output ->
                 output.writeInt(CACHE_MAGIC)
                 output.writeInt(CACHE_VERSION)
                 output.writeLong(mainFile.length())
@@ -611,7 +607,7 @@ class TagAutocompleteRepository private constructor(private val context: Context
         var validRows = 0
         input.use { stream ->
             target.outputStream().use { out ->
-                val reader = BufferedReader(InputStreamReader(stream))
+                val reader = stream.reader().buffered()
                 val writer = out.bufferedWriter()
                 reader.forEachLine { rawLine ->
                     val line = rawLine.trim()

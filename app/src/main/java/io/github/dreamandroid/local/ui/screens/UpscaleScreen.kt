@@ -50,7 +50,6 @@ import io.github.dreamandroid.local.ui.theme.Motion
 import io.github.dreamandroid.local.utils.performUpscale
 import io.github.dreamandroid.local.utils.saveImage
 import java.io.File
-import java.io.FileOutputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -304,7 +303,7 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
                                                     context.cacheDir,
                                                     "upscaled_temp_${System.currentTimeMillis()}.jpg",
                                                 )
-                                                FileOutputStream(tempFile).use { out ->
+                                                tempFile.outputStream().use { out ->
                                                     bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
                                                 }
                                                 upscaledImageUri = Uri.fromFile(tempFile)

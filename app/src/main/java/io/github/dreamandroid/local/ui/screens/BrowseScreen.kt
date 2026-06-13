@@ -40,7 +40,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -577,7 +576,7 @@ private suspend fun saveBitmapToGallery(
             )
             if (!dir.exists()) dir.mkdirs()
             val file = File(dir, filename)
-            FileOutputStream(file).use { out ->
+            file.outputStream().use { out ->
                 bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out)
             }
         }
