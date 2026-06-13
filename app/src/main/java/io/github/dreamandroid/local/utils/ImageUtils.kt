@@ -15,11 +15,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Base64
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -66,75 +64,69 @@ suspend fun performUpscale(context: Context, bitmap: Bitmap, upscalerId: String)
         "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms",
     )
 
-    // Prepare binary request
-    val url = URL("http://localhost:8081/upscale")
-    val connection = url.openConnection() as HttpURLConnection
+    // Send RGB binary data to local upscale backend via OkHttp
+    val client = OkHttpClient.Builder()
+        .connectTimeout(300.seconds) // 5 minutes
+        .readTimeout(300.seconds)
+        .build()
 
-    try {
-        connection.requestMethod = "POST"
-        connection.setRequestProperty("Content-Type", "application/octet-stream")
-        connection.setRequestProperty("X-Image-Width", width.toString())
-        connection.setRequestProperty("X-Image-Height", height.toString())
-        connection.setRequestProperty("X-Upscaler-Path", upscalerFile.absolutePath)
-        connection.doOutput = true
-        connection.connectTimeout = 300000 // 5 minutes
-        connection.readTimeout = 300000
+    val requestBody = rgbBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
+    val request = Request.Builder()
+        .url("http://localhost:8081/upscale")
+        .header("X-Image-Width", width.toString())
+        .header("X-Image-Height", height.toString())
+        .header("X-Upscaler-Path", upscalerFile.absolutePath)
+        .post(requestBody)
+        .build()
 
-        // Send RGB binary data directly
-        val sendStartTime = System.currentTimeMillis()
-        connection.outputStream.use { os ->
-            os.write(rgbBytes)
-        }
+    val sendStartTime = System.currentTimeMillis()
+    client.newCall(request).execute().use { response ->
         Log.d(
             "UpscaleBinary",
             "Send data took: ${System.currentTimeMillis() - sendStartTime}ms",
         )
 
-        // Read response
-        val responseCode = connection.responseCode
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            // Read JPEG binary data
-            val readStartTime = System.currentTimeMillis()
-            val imageBytes = connection.inputStream.use { it.readBytes() }
-            Log.d(
-                "UpscaleBinary",
-                "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB",
-            )
-
-            // Decode JPEG to Bitmap
-            val decodeStartTime = System.currentTimeMillis()
-            val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-            Log.d(
-                "UpscaleBinary",
-                "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms",
-            )
-
-            if (resultBitmap == null) {
-                throw Exception("Failed to decode JPEG response")
-            }
-
-            // Read response headers
-            val resultWidth =
-                connection.getHeaderField("X-Output-Width")?.toIntOrNull() ?: resultBitmap.width
-            val resultHeight =
-                connection.getHeaderField("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
-            val durationMs = connection.getHeaderField("X-Duration-Ms")?.toIntOrNull() ?: 0
-
-            Log.d("UpscaleBinary", "=== Upscale complete ===")
-            Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
-            Log.d(
-                "UpscaleBinary",
-                "Client total time: ${System.currentTimeMillis() - totalStartTime}ms",
-            )
-            Log.d("UpscaleBinary", "Output size: ${resultWidth}x$resultHeight")
-
-            resultBitmap
-        } else {
-            val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
-            throw Exception("Upscale failed with response code: $responseCode, error: $errorBody")
+        if (!response.isSuccessful) {
+            val errorBody = response.body?.string()
+            throw Exception("Upscale failed with response code: ${response.code}, error: $errorBody")
         }
-    } finally {
-        connection.disconnect()
+
+        // Read JPEG binary data
+        val readStartTime = System.currentTimeMillis()
+        val imageBytes = response.body?.bytes() ?: throw Exception("Empty response body")
+        Log.d(
+            "UpscaleBinary",
+            "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB",
+        )
+
+        // Decode JPEG to Bitmap
+        val decodeStartTime = System.currentTimeMillis()
+        val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        Log.d(
+            "UpscaleBinary",
+            "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms",
+        )
+
+        if (resultBitmap == null) {
+            throw Exception("Failed to decode JPEG response")
+        }
+
+        // Read response headers
+        val resultWidth =
+            response.header("X-Output-Width")?.toIntOrNull() ?: resultBitmap.width
+        val resultHeight =
+            response.header("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
+        val durationMs = response.header("X-Duration-Ms")?.toIntOrNull() ?: 0
+
+        Log.d("UpscaleBinary", "=== Upscale complete ===")
+        Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
+        Log.d(
+            "UpscaleBinary",
+            "Client total time: ${System.currentTimeMillis() - totalStartTime}ms",
+        )
+        Log.d("UpscaleBinary", "Output size: ${resultWidth}x$resultHeight")
+
+        resultBitmap
     }
 }
 
@@ -171,9 +163,9 @@ suspend fun reportImage(
             }
 
             val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .writeTimeout(60, TimeUnit.SECONDS)
-                .readTimeout(30, TimeUnit.SECONDS)
+                .connectTimeout(30.seconds)
+                .writeTimeout(60.seconds)
+                .readTimeout(30.seconds)
                 .build()
 
             val requestBody = jsonObject.toString()

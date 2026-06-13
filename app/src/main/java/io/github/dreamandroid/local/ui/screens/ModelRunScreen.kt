@@ -211,8 +211,9 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.Base64
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -245,9 +246,9 @@ private fun checkStoragePermission(context: Context): Boolean = if (Build.VERSIO
 
 private val tokenizeClient: OkHttpClient by lazy {
     OkHttpClient.Builder()
-        .connectTimeout(2, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .writeTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(2.seconds)
+        .readTimeout(5.seconds)
+        .writeTimeout(5.seconds)
         .build()
 }
 
@@ -284,7 +285,7 @@ private suspend fun checkBackendHealth(
 ) = withContext(Dispatchers.IO) {
     try {
         val client = OkHttpClient.Builder()
-            .connectTimeout(100, TimeUnit.MILLISECONDS) // 100ms
+            .connectTimeout(100.milliseconds) // 100ms
             .build()
 
         val startTime = System.currentTimeMillis()

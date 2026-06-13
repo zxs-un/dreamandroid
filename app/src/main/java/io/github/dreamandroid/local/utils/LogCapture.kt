@@ -2,8 +2,6 @@ package io.github.dreamandroid.local.utils
 
 import android.util.Log
 import androidx.compose.runtime.mutableStateOf
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -43,7 +41,7 @@ object LogCapture {
                 captureScope = scope
                 captureJob = scope.launch {
                     try {
-                        BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                        proc.inputStream.bufferedReader().use { reader ->
                             var line: String? = null
                             while (isActive && reader.readLine().also { line = it } != null) {
                                 val current = line ?: continue

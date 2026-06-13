@@ -11,12 +11,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.graphics.createBitmap
 import io.github.dreamandroid.local.R
-import java.io.BufferedReader
 import java.io.File
 import java.io.IOException
-import java.io.InputStreamReader
 import java.util.Base64
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,17 +70,17 @@ class BackgroundGenerationService : Service() {
          */
         private val sharedClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
-                .connectTimeout(3600, TimeUnit.SECONDS)
-                .readTimeout(3600, TimeUnit.SECONDS)
-                .writeTimeout(3600, TimeUnit.SECONDS)
-                .callTimeout(3600, TimeUnit.SECONDS)
+                .connectTimeout(3600.seconds)
+                .readTimeout(3600.seconds)
+                .writeTimeout(3600.seconds)
+                .callTimeout(3600.seconds)
                 .retryOnConnectionFailure(true)
                 // Aggressively evict idle connections so the backend
                 // doesn't accumulate stale sockets across batch items.
                 .connectionPool(
                     okhttp3.ConnectionPool(
                         maxIdleConnections = 2,
-                        keepAliveDuration = 1, TimeUnit.SECONDS,
+                        keepAliveDuration = 1.seconds,
                     ),
                 )
                 .build()
@@ -144,8 +143,8 @@ class BackgroundGenerationService : Service() {
         suspend fun checkBackendHealth(): Boolean = withContext(Dispatchers.IO) {
             try {
                 val client = OkHttpClient.Builder()
-                    .connectTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-                    .readTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                    .connectTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS.milliseconds)
+                    .readTimeout(BACKEND_HEALTH_CHECK_TIMEOUT_MS.milliseconds)
                     .build()
                 val request = Request.Builder()
                     .url("http://localhost:8081/health")
@@ -436,7 +435,7 @@ class BackgroundGenerationService : Service() {
                 response.body?.let { responseBody ->
                     Log.d("BgGenService", "Reading streaming response")
 
-                    val reader = BufferedReader(InputStreamReader(responseBody.byteStream()))
+                    val reader = responseBody.charStream().buffered()
                     var messageCount = 0
 
                     // Read line by line for efficiency.
