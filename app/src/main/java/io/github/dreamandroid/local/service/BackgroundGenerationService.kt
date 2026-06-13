@@ -143,7 +143,7 @@ class BackgroundGenerationService : Service() {
          */
         suspend fun checkBackendHealth(): Boolean = withContext(Dispatchers.IO) {
             try {
-                val client = OkHttpClient.Builder()
+                val client = sharedClient.newBuilder()
                     .connectTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
                     .readTimeout(Duration.ofMillis(BACKEND_HEALTH_CHECK_TIMEOUT_MS))
                     .build()

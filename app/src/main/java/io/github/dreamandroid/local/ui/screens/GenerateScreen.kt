@@ -34,46 +34,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
-import java.time.Duration
-
-private data class GenerateTokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
-
-private val generateScreenTokenizeClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(Duration.ofSeconds(2))
-        .readTimeout(Duration.ofSeconds(5))
-        .writeTimeout(Duration.ofSeconds(5))
-        .build()
-}
-
-private suspend fun tokenizePromptForGenerate(text: String): GenerateTokenizeResult? = withContext(Dispatchers.IO) {
-    try {
-        val body = JSONObject().apply { put("prompt", text) }
-            .toString()
-            .toRequestBody("application/json".toMediaTypeOrNull())
-        val request = Request.Builder()
-            .url("http://localhost:8081/tokenize")
-            .post(body)
-            .build()
-        generateScreenTokenizeClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@withContext null
-            val payload = response.body?.string() ?: return@withContext null
-            val json = JSONObject(payload)
-            GenerateTokenizeResult(
-                count = json.optInt("count", 0),
-                maxLength = json.optInt("max_length", 77),
-                overflowOffset = json.optInt("overflow_offset", -1),
-            )
-        }
-    } catch (_: Exception) {
-        null
-    }
-}
+import io.github.dreamandroid.local.DreamAndroidApplication
+import io.github.dreamandroid.local.service.backend.BackendManager
 
 /**
  * GenerateScreen – image generation parameter configuration.
@@ -117,6 +79,7 @@ fun GenerateScreen(
     val modelRepository = remember { ModelRepository(context) }
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
     val generationPreferences = remember { GenerationPreferences(context) }
+    val backendManager = remember { (context.applicationContext as DreamAndroidApplication).backendManager }
 
     // ---- Token count / CLIP limit (77 tokens) ----
     var promptTokenCount by remember { mutableIntStateOf(2) }
@@ -166,17 +129,25 @@ fun GenerateScreen(
     // ---- Token count / CLIP limit debounced requests ----
     LaunchedEffect(prompt) {
         delay(400)
-        val result = tokenizePromptForGenerate(prompt) ?: return@LaunchedEffect
-        promptTokenCount = result.count
-        promptTokenMax = result.maxLength
-        promptOverflowOffset = result.overflowOffset
+        try {
+            val result = withContext(Dispatchers.IO) { backendManager.tokenize(prompt) }
+            promptTokenCount = result.count
+            promptTokenMax = result.maxLength
+            promptOverflowOffset = result.overflowOffset
+        } catch (_: Exception) {
+            // Silently ignore tokenize failures — non-critical UX
+        }
     }
     LaunchedEffect(negativePrompt) {
         delay(400)
-        val result = tokenizePromptForGenerate(negativePrompt) ?: return@LaunchedEffect
-        negativePromptTokenCount = result.count
-        negativePromptTokenMax = result.maxLength
-        negativePromptOverflowOffset = result.overflowOffset
+        try {
+            val result = withContext(Dispatchers.IO) { backendManager.tokenize(negativePrompt) }
+            negativePromptTokenCount = result.count
+            negativePromptTokenMax = result.maxLength
+            negativePromptOverflowOffset = result.overflowOffset
+        } catch (_: Exception) {
+            // Silently ignore tokenize failures — non-critical UX
+        }
     }
 
     // Clear queue feedback message after a delay

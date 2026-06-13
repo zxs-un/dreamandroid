@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import io.github.dreamandroid.local.DreamAndroidApplication
 import io.github.dreamandroid.local.data.Model
 import io.github.dreamandroid.local.ui.screens.GenerationParameters
 import java.io.ByteArrayOutputStream
@@ -63,70 +64,39 @@ suspend fun performUpscale(context: Context, bitmap: Bitmap, upscalerId: String)
         "Prepare RGB data took: ${System.currentTimeMillis() - prepareStartTime}ms",
     )
 
-    // Send RGB binary data to local upscale backend via OkHttp
-    val client = OkHttpClient.Builder()
-        .connectTimeout(Duration.ofSeconds(300)) // 5 minutes
-        .readTimeout(Duration.ofSeconds(300))
-        .build()
-
-    val requestBody = rgbBytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
-    val request = Request.Builder()
-        .url("http://localhost:8081/upscale")
-        .header("X-Image-Width", width.toString())
-        .header("X-Image-Height", height.toString())
-        .header("X-Upscaler-Path", upscalerFile.absolutePath)
-        .post(requestBody)
-        .build()
-
+    // Use shared BackendManager for HTTP (shared OkHttpClient connection pool)
+    val app = context.applicationContext as DreamAndroidApplication
     val sendStartTime = System.currentTimeMillis()
-    client.newCall(request).execute().use { response ->
-        Log.d(
-            "UpscaleBinary",
-            "Send data took: ${System.currentTimeMillis() - sendStartTime}ms",
-        )
+    val imageBytes = app.backendManager.upscale(rgbBytes, width, height, upscalerFile.absolutePath)
+    Log.d(
+        "UpscaleBinary",
+        "Send data took: ${System.currentTimeMillis() - sendStartTime}ms",
+    )
+    Log.d(
+        "UpscaleBinary",
+        "Receive JPEG data size: ${imageBytes.size / 1024}KB",
+    )
 
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string()
-            throw Exception("Upscale failed with response code: ${response.code}, error: $errorBody")
-        }
+    // Decode JPEG to Bitmap
+    val decodeStartTime = System.currentTimeMillis()
+    val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+    Log.d(
+        "UpscaleBinary",
+        "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms",
+    )
 
-        // Read JPEG binary data
-        val readStartTime = System.currentTimeMillis()
-        val imageBytes = response.body?.bytes() ?: throw Exception("Empty response body")
-        Log.d(
-            "UpscaleBinary",
-            "Receive JPEG data took: ${System.currentTimeMillis() - readStartTime}ms, size: ${imageBytes.size / 1024}KB",
-        )
-
-        // Decode JPEG to Bitmap
-        val decodeStartTime = System.currentTimeMillis()
-        val resultBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
-        Log.d(
-            "UpscaleBinary",
-            "Decode JPEG took: ${System.currentTimeMillis() - decodeStartTime}ms",
-        )
-
-        if (resultBitmap == null) {
-            throw Exception("Failed to decode JPEG response")
-        }
-
-        // Read response headers
-        val resultWidth =
-            response.header("X-Output-Width")?.toIntOrNull() ?: resultBitmap.width
-        val resultHeight =
-            response.header("X-Output-Height")?.toIntOrNull() ?: resultBitmap.height
-        val durationMs = response.header("X-Duration-Ms")?.toIntOrNull() ?: 0
-
-        Log.d("UpscaleBinary", "=== Upscale complete ===")
-        Log.d("UpscaleBinary", "Server processing took: ${durationMs}ms")
-        Log.d(
-            "UpscaleBinary",
-            "Client total time: ${System.currentTimeMillis() - totalStartTime}ms",
-        )
-        Log.d("UpscaleBinary", "Output size: ${resultWidth}x$resultHeight")
-
-        resultBitmap
+    if (resultBitmap == null) {
+        throw Exception("Failed to decode JPEG response")
     }
+
+    Log.d("UpscaleBinary", "=== Upscale complete ===")
+    Log.d(
+        "UpscaleBinary",
+        "Client total time: ${System.currentTimeMillis() - totalStartTime}ms",
+    )
+    Log.d("UpscaleBinary", "Output size: ${resultBitmap.width}x${resultBitmap.height}")
+
+    resultBitmap
 }
 
 suspend fun reportImage(

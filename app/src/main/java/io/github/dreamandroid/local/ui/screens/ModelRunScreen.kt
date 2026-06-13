@@ -212,22 +212,16 @@ import java.io.File
 import java.util.Base64
 import java.util.Locale
 import kotlin.math.roundToInt
-import java.time.Duration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONObject
+import io.github.dreamandroid.local.DreamAndroidApplication
+import io.github.dreamandroid.local.service.backend.BackendManager
 
 // Prompt undo/redo: cap on stored steps, and the window within which continuous
 // typing collapses into a single step.
@@ -241,95 +235,6 @@ private fun checkStoragePermission(context: Context): Boolean = if (Build.VERSIO
         context,
         Manifest.permission.WRITE_EXTERNAL_STORAGE,
     ) == PackageManager.PERMISSION_GRANTED
-}
-
-private val tokenizeClient: OkHttpClient by lazy {
-    OkHttpClient.Builder()
-        .connectTimeout(Duration.ofSeconds(2))
-        .readTimeout(Duration.ofSeconds(5))
-        .writeTimeout(Duration.ofSeconds(5))
-        .build()
-}
-
-private data class TokenizeResult(val count: Int, val maxLength: Int, val overflowOffset: Int)
-
-private suspend fun tokenizePromptRequest(text: String): TokenizeResult? = withContext(Dispatchers.IO) {
-    try {
-        val body = JSONObject().apply { put("prompt", text) }
-            .toString()
-            .toRequestBody("application/json".toMediaTypeOrNull())
-        val request = Request.Builder()
-            .url("http://localhost:8081/tokenize")
-            .post(body)
-            .build()
-        tokenizeClient.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) return@withContext null
-            val payload = response.body?.string() ?: return@withContext null
-            val json = JSONObject(payload)
-            TokenizeResult(
-                count = json.optInt("count", 0),
-                maxLength = json.optInt("max_length", 77),
-                overflowOffset = json.optInt("overflow_offset", -1),
-            )
-        }
-    } catch (_: Exception) {
-        null
-    }
-}
-
-private suspend fun checkBackendHealth(
-    backendState: StateFlow<BackendService.BackendState>,
-    onHealthy: () -> Unit,
-    onUnhealthy: () -> Unit,
-) = withContext(Dispatchers.IO) {
-    try {
-        val client = OkHttpClient.Builder()
-            .connectTimeout(Duration.ofMillis(100))
-            .build()
-
-        val startTime = System.currentTimeMillis()
-//        val timeoutDuration = 10000
-        val timeoutDuration = 60000
-
-        while (currentCoroutineContext().isActive) {
-            if (backendState.value is BackendService.BackendState.Error) {
-                withContext(Dispatchers.Main) {
-                    onUnhealthy()
-                }
-                break
-            }
-
-            if (System.currentTimeMillis() - startTime > timeoutDuration) {
-                withContext(Dispatchers.Main) {
-                    onUnhealthy()
-                }
-                break
-            }
-
-            try {
-                val request = Request.Builder()
-                    .url("http://localhost:8081/health")
-                    .get()
-                    .build()
-
-                val response = client.newCall(request).execute()
-                if (response.isSuccessful) {
-                    withContext(Dispatchers.Main) {
-                        onHealthy()
-                    }
-                    break
-                }
-            } catch (e: Exception) {
-                // e
-            }
-
-            delay(100)
-        }
-    } catch (e: Exception) {
-        withContext(Dispatchers.Main) {
-            onUnhealthy()
-        }
-    }
 }
 
 /**
@@ -414,6 +319,7 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     val resources = context.resources
     val scope = rememberCoroutineScope()
     val generationPreferences = remember { GenerationPreferences(context) }
+    val backendManager = remember { (context.applicationContext as DreamAndroidApplication).backendManager }
     val coroutineScope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
     val modelRepository = remember { ModelRepository(context) }
@@ -774,18 +680,26 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     LaunchedEffect(prompt, isCheckingBackend) {
         if (isCheckingBackend) return@LaunchedEffect
         delay(400)
-        val result = tokenizePromptRequest(prompt) ?: return@LaunchedEffect
-        promptTokenCount = result.count
-        promptTokenMax = result.maxLength
-        promptOverflowOffset = result.overflowOffset
+        try {
+            val result = withContext(Dispatchers.IO) { backendManager.tokenize(prompt) }
+            promptTokenCount = result.count
+            promptTokenMax = result.maxLength
+            promptOverflowOffset = result.overflowOffset
+        } catch (_: Exception) {
+            // Silently ignore tokenize failures
+        }
     }
     LaunchedEffect(negativePrompt, isCheckingBackend) {
         if (isCheckingBackend) return@LaunchedEffect
         delay(400)
-        val result = tokenizePromptRequest(negativePrompt) ?: return@LaunchedEffect
-        negativePromptTokenCount = result.count
-        negativePromptTokenMax = result.maxLength
-        negativePromptOverflowOffset = result.overflowOffset
+        try {
+            val result = withContext(Dispatchers.IO) { backendManager.tokenize(negativePrompt) }
+            negativePromptTokenCount = result.count
+            negativePromptTokenMax = result.maxLength
+            negativePromptOverflowOffset = result.overflowOffset
+        } catch (_: Exception) {
+            // Silently ignore tokenize failures
+        }
     }
 
     // Build embedding TagSuggestion rows for the current query. Returns at most
@@ -1956,31 +1870,25 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
     }
 
     LaunchedEffect(Unit) {
-        checkBackendHealth(
-            backendState = BackendService.backendState,
-            onHealthy = {
-                isCheckingBackend = false
-            },
-            onUnhealthy = {
-                isCheckingBackend = false
-                errorMessage = msgBackendFailed
-            },
-        )
+        val healthy = withContext(Dispatchers.IO) {
+            backendManager.healthCheckWithRetry()
+        }
+        isCheckingBackend = false
+        if (!healthy) {
+            errorMessage = msgBackendFailed
+        }
     }
 
     LaunchedEffect(backendRestartTrigger) {
         if (backendRestartTrigger > 0) {
             delay(500)
-            checkBackendHealth(
-                backendState = BackendService.backendState,
-                onHealthy = {
-                    isCheckingBackend = false
-                },
-                onUnhealthy = {
-                    isCheckingBackend = false
-                    errorMessage = msgBackendFailed
-                },
-            )
+            val healthy = withContext(Dispatchers.IO) {
+                backendManager.healthCheckWithRetry()
+            }
+            isCheckingBackend = false
+            if (!healthy) {
+                errorMessage = msgBackendFailed
+            }
         }
     }
 
