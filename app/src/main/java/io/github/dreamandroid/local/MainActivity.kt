@@ -278,6 +278,9 @@ private fun AppContent() {
 
                 when (result) {
                     null -> { /* timeout — task will remain pending */ }
+                    is BackgroundGenerationService.GenerationState.Idle,
+                    is BackgroundGenerationService.GenerationState.Started,
+                    is BackgroundGenerationService.GenerationState.Progress -> { /* filtered out, unreachable */ }
                     is BackgroundGenerationService.GenerationState.Complete -> {
                         // Save to history
                         val params = GenerationParameters(
