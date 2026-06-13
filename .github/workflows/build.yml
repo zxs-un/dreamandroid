@@ -288,35 +288,30 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan github.com >> ~/.ssh/known_hosts
 
-          # Clone qairt to /tmp to avoid polluting workspace
-          git clone --depth 1 "$QAIRT_REPO" /tmp/qairt_ks 2>/dev/null || true
-
-          if [ -d /tmp/qairt_ks/.git ]; then
-            cd /tmp/qairt_ks
-            if git fetch origin keystore 2>/dev/null && git checkout keystore 2>/dev/null; then
-              cp release.keystore "$GITHUB_WORKSPACE/release.keystore"
-              echo "✅ Using existing keystore from qairt@keystore"
-            else
-              echo "🔑 keystore branch not found, generating new keystore..."
-              keytool -genkey -v \
-                -keystore "$GITHUB_WORKSPACE/release.keystore" \
-                -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
-                -storepass "$KEYSTORE_PASS" -keypass "$KEY_PASS" \
-                -dname "CN=Android Debug, OU=DreamHub, O=DreamHub, L=Unknown, ST=Unknown, C=US"
-
-              # Push to qairt as orphan branch (only keystore file, nothing else)
-              git checkout --orphan keystore
-              git rm -rf --ignore-unmatch . 2>/dev/null || true
-              cp "$GITHUB_WORKSPACE/release.keystore" .
-              git add release.keystore
-              git -c user.name="CI" -c user.email="ci@dreamhub" \
-                commit -m "Store release keystore"
-              git push origin keystore --force
-              echo "✅ Generated and stored keystore to qairt@keystore"
-            fi
-            cd "$GITHUB_WORKSPACE"
+          # Clone keystore orphan branch directly
+          if git clone --depth 1 --branch keystore "$QAIRT_REPO" /tmp/qairt_ks 2>/dev/null; then
+            cp /tmp/qairt_ks/release.keystore "$GITHUB_WORKSPACE/release.keystore"
+            echo "✅ Using existing keystore from qairt@keystore"
           else
-            echo "⚠️  Cannot access qairt repo — falling back to debug keystore"
+            echo "🔑 keystore branch not found, generating new keystore..."
+            keytool -genkey -v \
+              -keystore "$GITHUB_WORKSPACE/release.keystore" \
+              -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$KEYSTORE_PASS" -keypass "$KEY_PASS" \
+              -dname "CN=Android Debug, OU=DreamHub, O=DreamHub, L=Unknown, ST=Unknown, C=US"
+
+            # Clone repo & push keystore as orphan branch
+            git clone --depth 1 "$QAIRT_REPO" /tmp/qairt_ks
+            cd /tmp/qairt_ks
+            git checkout --orphan keystore
+            git rm -rf --ignore-unmatch . 2>/dev/null || true
+            cp "$GITHUB_WORKSPACE/release.keystore" .
+            git add release.keystore
+            git -c user.name="CI" -c user.email="ci@dreamhub" \
+              commit -m "Store release keystore"
+            git push origin keystore --force
+            cd "$GITHUB_WORKSPACE"
+            echo "✅ Generated and stored keystore to qairt@keystore"
           fi
 
           # Write keystore.properties for Gradle
