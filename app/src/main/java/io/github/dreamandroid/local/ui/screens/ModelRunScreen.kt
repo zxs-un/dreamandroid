@@ -99,6 +99,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -118,6 +119,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
@@ -141,7 +144,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -190,6 +192,7 @@ import io.github.dreamandroid.local.service.BackgroundGenerationService
 import io.github.dreamandroid.local.service.BackgroundGenerationService.GenerationState
 import io.github.dreamandroid.local.service.ModelDownloadService
 import io.github.dreamandroid.local.ui.components.BlockingProgressOverlay
+import io.github.dreamandroid.local.ui.components.ErrorMessageCard
 import io.github.dreamandroid.local.ui.components.GenerationParamsDialog
 import io.github.dreamandroid.local.ui.components.ImportParametersDialog
 import io.github.dreamandroid.local.ui.components.OverlayIconButton
@@ -2745,30 +2748,10 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                 exit = shrinkVertically() + fadeOut(),
             ) {
                 errorMessage?.let { msg ->
-                    Card(
-                        onClick = { errorMessage = null },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                Icons.Default.Error,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                            Text(
-                                msg,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                    }
+                    ErrorMessageCard(
+                        message = msg,
+                        onDismiss = { errorMessage = null },
+                    )
                 }
             }
             AnimatedVisibility(
@@ -3544,39 +3527,22 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
 
                                     // Selection indicator
                                     if (isSelectionMode) {
-                                        Box(
+                                        Checkbox(
+                                            checked = isSelected,
+                                            onCheckedChange = { checked ->
+                                                if (checked) {
+                                                    selectedItems.add(item)
+                                                } else {
+                                                    selectedItems.remove(item)
+                                                    if (selectedItems.isEmpty()) {
+                                                        isSelectionMode = false
+                                                    }
+                                                }
+                                            },
                                             modifier = Modifier
                                                 .align(Alignment.TopEnd)
-                                                .padding(8.dp)
-                                                .size(24.dp)
-                                                .background(
-                                                    color = if (isSelected) {
-                                                        MaterialTheme.colorScheme.primary
-                                                    } else {
-                                                        MaterialTheme.colorScheme.scrim.copy(alpha = 0.4f)
-                                                    },
-                                                    shape = CircleShape,
-                                                )
-                                                .border(
-                                                    width = 2.dp,
-                                                    color = if (isSelected) {
-                                                        MaterialTheme.colorScheme.primary
-                                                    } else {
-                                                        Color.White
-                                                    },
-                                                    shape = CircleShape,
-                                                ),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            if (isSelected) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Check,
-                                                    contentDescription = "Selected",
-                                                    tint = MaterialTheme.colorScheme.onPrimary,
-                                                    modifier = Modifier.size(16.dp),
-                                                )
-                                            }
-                                        }
+                                                .padding(8.dp),
+                                        )
                                     }
                                 }
                             }
@@ -3736,41 +3702,11 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         scrolledContainerColor = MaterialTheme.colorScheme.surface,
                     ),
                     scrollBehavior = scrollBehavior,
-                    actions = {
-                        Row {
-                            val tabs = listOf(
-                                stringResource(R.string.prompt_tab),
-                                stringResource(R.string.result_tab),
-                                stringResource(R.string.history_tab),
-                            )
-                            tabs.forEachIndexed { index, label ->
-                                val selected = pagerState.currentPage == index
-                                TextButton(
-                                    onClick = {
-                                        coroutineScope.launch {
-                                            focusManager.clearFocus()
-                                            pagerState.animateScrollToPage(index)
-                                        }
-                                    },
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = if (selected) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    ),
-                                ) {
-                                    Text(label)
-                                }
-                            }
-                        }
-                    },
                 )
             },
         ) { paddingValues ->
             if (model != null) {
-                HorizontalPager(
-                    state = pagerState,
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
@@ -3779,11 +3715,50 @@ fun ModelRunScreen(modelId: String, navController: NavController, modifier: Modi
                         // remaining IME height, instead of double-counting the nav
                         // bar and leaving a background strip above the keyboard.
                         .consumeWindowInsets(paddingValues),
-                ) { page ->
-                    when (page) {
-                        0 -> PromptPage()
-                        1 -> ResultPage()
-                        2 -> HistoryPage()
+                ) {
+                    TabRow(
+                        selectedTabIndex = pagerState.currentPage,
+                    ) {
+                        Tab(
+                            selected = pagerState.currentPage == 0,
+                            onClick = {
+                                coroutineScope.launch {
+                                    focusManager.clearFocus()
+                                    pagerState.animateScrollToPage(0)
+                                }
+                            },
+                            text = { Text(stringResource(R.string.prompt_tab)) },
+                        )
+                        Tab(
+                            selected = pagerState.currentPage == 1,
+                            onClick = {
+                                coroutineScope.launch {
+                                    focusManager.clearFocus()
+                                    pagerState.animateScrollToPage(1)
+                                }
+                            },
+                            text = { Text(stringResource(R.string.result_tab)) },
+                        )
+                        Tab(
+                            selected = pagerState.currentPage == 2,
+                            onClick = {
+                                coroutineScope.launch {
+                                    focusManager.clearFocus()
+                                    pagerState.animateScrollToPage(2)
+                                }
+                            },
+                            text = { Text(stringResource(R.string.history_tab)) },
+                        )
+                    }
+                    HorizontalPager(
+                        state = pagerState,
+                        modifier = Modifier.fillMaxSize(),
+                    ) { page ->
+                        when (page) {
+                            0 -> PromptPage()
+                            1 -> ResultPage()
+                            2 -> HistoryPage()
+                        }
                     }
                 }
             }

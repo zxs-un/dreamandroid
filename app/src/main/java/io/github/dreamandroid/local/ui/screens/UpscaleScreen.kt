@@ -45,6 +45,7 @@ import io.github.dreamandroid.local.BuildConfig
 import io.github.dreamandroid.local.R
 import io.github.dreamandroid.local.service.UpscaleBackendManager
 import io.github.dreamandroid.local.ui.components.BlockingProgressOverlay
+import io.github.dreamandroid.local.ui.components.ErrorMessageCard
 import io.github.dreamandroid.local.ui.components.SmoothCircularWavyProgressIndicator
 import io.github.dreamandroid.local.ui.theme.Motion
 import io.github.dreamandroid.local.utils.performUpscale
@@ -428,30 +429,10 @@ fun UpscaleScreen(modifier: Modifier = Modifier) {
                     .padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
                 errorMessage?.let { msg ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                        ),
-                        onClick = { errorMessage = null },
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Error,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                            Text(
-                                text = msg,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                        }
-                    }
+                    ErrorMessageCard(
+                        message = msg,
+                        onDismiss = { errorMessage = null },
+                    )
                 }
             }
         }
