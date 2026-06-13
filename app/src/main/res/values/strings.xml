@@ -377,6 +377,7 @@
 
     <!-- Bottom Navigation -->
     <string name="nav_models">Models</string>
+    <string name="nav_queue">Queue</string>
     <string name="nav_generate">Generate</string>
     <string name="nav_upscale">Upscale</string>
     <string name="nav_browse">Gallery</string>
@@ -392,6 +393,7 @@
     <string name="generate_model_not_loaded">Generate model not loaded</string>
     <string name="upscale_model_not_loaded">Upscale model not loaded</string>
     <string name="stop_generation">Stop generation</string>
+    <string name="added_to_queue">Added %d task(s) to queue</string>
     <string name="no_model_loaded_hint">Please load a model in the Models tab first</string>
     <string name="load_upscale_model">Load Upscale Model</string>
     <string name="unload_upscale_model">Unload Upscale Model</string>

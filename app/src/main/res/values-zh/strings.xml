@@ -367,6 +367,7 @@
 
     <!-- Bottom Navigation -->
     <string name="nav_models">模型</string>
+    <string name="nav_queue">队列</string>
     <string name="nav_generate">生成</string>
     <string name="nav_upscale">放大</string>
     <string name="nav_browse">图库</string>
@@ -391,6 +392,7 @@
     <string name="rename_failed">重命名失败: %s</string>
     <string name="delete_model_confirm_single">确定要删除此模型吗？此操作无法撤销。</string>
     <string name="stop_generation">停止生成</string>
+    <string name="added_to_queue">已添加 %d 个任务到队列</string>
     <string name="model_type_generation">生成</string>
     <string name="model_type_upscale">放大</string>
     <string name="import_model">导入模型文件</string>

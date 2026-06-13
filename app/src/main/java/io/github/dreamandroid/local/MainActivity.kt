@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +39,7 @@ import io.github.dreamandroid.local.navigation.BottomTab
 import io.github.dreamandroid.local.service.BackendService
 import io.github.dreamandroid.local.service.BackgroundGenerationService
 import io.github.dreamandroid.local.service.ModelDownloadService
+import io.github.dreamandroid.local.service.QueueRepository
 import io.github.dreamandroid.local.service.UpscaleBackendManager
 import io.github.dreamandroid.local.ui.screens.*
 import io.github.dreamandroid.local.ui.theme.DreamHubTheme
@@ -45,8 +47,10 @@ import io.github.dreamandroid.local.ui.theme.LocalThemeController
 import io.github.dreamandroid.local.ui.theme.rememberThemeController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -180,20 +184,163 @@ private fun AppContent() {
     var genWidth by remember { mutableIntStateOf(512) }
     var genHeight by remember { mutableIntStateOf(512) }
 
-    // ---- Batch generation state (driven by GenerateScreen, consumed by GenerateTopBar) ----
-    val serviceState by BackgroundGenerationService.generationState.collectAsState()
-    val progressState = serviceState as? BackgroundGenerationService.GenerationState.Progress
-    val isServiceRunning by BackgroundGenerationService.isServiceRunning.collectAsState()
-    // Stop button remains visible while the generation service is still running,
-    // even if the state was reset to Idle by a soft-stop request.
-    val isGenerating = progressState != null || isServiceRunning
-    var genBatchIndex by remember { mutableIntStateOf(0) }
-    var genBatchJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var genGenerateTrigger by remember { mutableIntStateOf(0) }
+    // ---- Queue repository ---- 
+    val queueRepository = remember { QueueRepository() }
+    val queueTasks by queueRepository.tasks.collectAsState()
+    val queueProcessing by queueRepository.processingActive.collectAsState()
+    val queueBatchGroups = remember(queueTasks) { queueRepository.getBatchGroups() }
 
-    // ---- Stop-click tracking for 3-click hard-kill ----
-    var stopClickCount by remember { mutableIntStateOf(0) }
-    var lastStopClickTime by remember { mutableStateOf(0L) }
+    // ---- Queue processing loop ----
+    // Watches the queue and processes pending tasks by starting
+    // BackgroundGenerationService for each one, health-checking first.
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            val task = queueRepository.getNextPending()
+            if (task == null) {
+                delay(500)
+                continue
+            }
+
+            queueRepository.setProcessingActive(true)
+            queueRepository.markTaskProcessing(task.id)
+
+            try {
+                // ---- Health check ----
+                val healthCheckRetryInterval = BackgroundGenerationService.getHealthCheckRetryIntervalMs(context)
+                val healthCheckMaxFails = BackgroundGenerationService.getHealthCheckMaxFailures(context)
+                var backendHealthy = false
+                var consecutiveFailures = 0
+                while (!backendHealthy) {
+                    backendHealthy = withContext(Dispatchers.IO) {
+                        BackgroundGenerationService.checkBackendHealth()
+                    }
+                    if (!backendHealthy) {
+                        consecutiveFailures++
+                        Log.w("MainActivity", "Queue: health check failed ($consecutiveFailures/$healthCheckMaxFails)")
+                        if (consecutiveFailures >= healthCheckMaxFails) {
+                            Log.e("MainActivity", "Queue: restarting backend")
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                                    delay(500)
+                                    context.stopService(Intent(context, BackendService::class.java).apply {
+                                        action = BackendService.ACTION_STOP
+                                    })
+                                    delay(2000)
+                                    val restartIntent = Intent(context, BackendService::class.java).apply {
+                                        putExtra("modelId", task.modelId)
+                                        putExtra("width", task.width)
+                                        putExtra("height", task.height)
+                                        putExtra("use_opencl", task.useOpenCL)
+                                    }
+                                    context.startForegroundService(restartIntent)
+                                }
+                                consecutiveFailures = 0
+                            } catch (e: Exception) {
+                                Log.e("MainActivity", "Queue: backend restart failed: ${e.message}", e)
+                                queueRepository.markTaskError(task.id, context.getString(R.string.backend_not_healthy))
+                                break
+                            }
+                        }
+                        delay(healthCheckRetryInterval)
+                    }
+                }
+                if (!backendHealthy) {
+                    continue // skip to next iteration, task already marked error
+                }
+
+                // ---- Start generation for this task ----
+                BackgroundGenerationService.forceResetIfStale()
+
+                val intent = Intent(context, BackgroundGenerationService::class.java).apply {
+                    putExtra("prompt", task.prompt)
+                    putExtra("negative_prompt", task.negativePrompt)
+                    putExtra("steps", task.steps)
+                    putExtra("cfg", task.cfg)
+                    task.seed?.let { putExtra("seed", it) }
+                    putExtra("width", task.width)
+                    putExtra("height", task.height)
+                    putExtra("effective_width", task.effectiveWidth)
+                    putExtra("effective_height", task.effectiveHeight)
+                    putExtra("denoise_strength", task.denoiseStrength)
+                    putExtra("use_opencl", task.useOpenCL)
+                    putExtra("scheduler", task.scheduler)
+                    putExtra("aspect_ratio", task.aspectRatio)
+                }
+                context.startForegroundService(intent)
+
+                // ---- Wait for completion/error with timeout ----
+                val result = withTimeoutOrNull(BackgroundGenerationService.getServiceWaitTimeoutMs(context)) {
+                    BackgroundGenerationService.generationState
+                        .first { it is BackgroundGenerationService.GenerationState.Complete ||
+                                 it is BackgroundGenerationService.GenerationState.Error }
+                }
+
+                when (result) {
+                    is BackgroundGenerationService.GenerationState.Complete -> {
+                        // Save to history
+                        val params = GenerationParameters(
+                            steps = task.steps,
+                            cfg = task.cfg,
+                            seed = task.seed,
+                            prompt = task.prompt,
+                            negativePrompt = task.negativePrompt,
+                            generationTime = null,
+                            width = task.width,
+                            height = task.height,
+                            runOnCpu = false,
+                            denoiseStrength = task.denoiseStrength,
+                            useOpenCL = task.useOpenCL,
+                            scheduler = task.scheduler,
+                        )
+                        withContext(Dispatchers.IO) {
+                            val historyManager = HistoryManager(context)
+                            result.bitmap?.let { bmp ->
+                                historyManager.saveGeneratedImage(
+                                    modelId = task.modelId,
+                                    bitmap = bmp,
+                                    params = params,
+                                    mode = GenerationMode.TXT2IMG,
+                                )
+                            }
+                        }
+                        queueRepository.markTaskComplete(task.id, result.bitmap, result.seed)
+                        BackgroundGenerationService.markBitmapConsumed()
+                    }
+                    is BackgroundGenerationService.GenerationState.Error -> {
+                        queueRepository.markTaskError(task.id, result.message)
+                        BackgroundGenerationService.resetState()
+                    }
+                    null -> {
+                        queueRepository.markTaskError(task.id, context.getString(R.string.generation_timeout))
+                        BackgroundGenerationService.resetState()
+                        context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                    }
+                }
+
+                // ---- Wait for service to stop ----
+                val serviceWaitTimeout = BackgroundGenerationService.getServiceWaitTimeoutMs(context)
+                val waitStartTime = System.currentTimeMillis()
+                while (BackgroundGenerationService.isServiceRunning.value) {
+                    if (System.currentTimeMillis() - waitStartTime > serviceWaitTimeout) {
+                        Log.w("MainActivity", "Queue: service did not stop, forcing")
+                        context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
+                        delay(500)
+                        break
+                    }
+                    delay(100)
+                }
+
+                BackgroundGenerationService.forceResetIfStale()
+
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Queue: unexpected error: ${e.message}", e)
+                queueRepository.markTaskError(task.id, e.message ?: "Unknown error")
+            } finally {
+                queueRepository.setProcessingActive(false)
+            }
+        }
+    }
 
     // ---- Import dialog state ----
     var showCustomModelDialog by remember { mutableStateOf(false) }
@@ -635,42 +782,11 @@ private fun AppContent() {
                         },
                         onDeleteModel = { showDeleteConfirm = true },
                     )
+                    BottomTab.Queue -> QueueTopBar(drawerState = drawerState)
                     BottomTab.Generate -> GenerateTopBar(
                         drawerState = drawerState,
                         modelId = selectedModelId,
                         isModelLoaded = isModelLoaded,
-                        batchCounts = genBatchCounts,
-                        batchIndex = genBatchIndex,
-                        isRunning = isGenerating,
-                        onGenerate = { genGenerateTrigger++ },
-                        onStop = {
-                            val now = System.currentTimeMillis()
-                            // Reset counter if more than 3 seconds since last click
-                            if (now - lastStopClickTime > 3000) stopClickCount = 0
-                            stopClickCount++
-                            lastStopClickTime = now
-
-                            // 1. Always cancel batch job — prevents frontend from
-                            //    sending any new HTTP requests.
-                            genBatchJob?.cancel()
-                            genBatchJob = null
-                            genBatchIndex = 0
-
-                            // 2. Always send soft-stop broadcast
-                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
-                            BackgroundGenerationService.resetState()
-
-                            // 3. On 3rd click: hard-kill the backend process
-                            if (stopClickCount >= 3) {
-                                android.util.Log.w("MainActivity",
-                                    "Hard stopping backend after $stopClickCount stop clicks")
-                                stopClickCount = 0
-                                // Stop the backend service which calls proc.destroyForcibly()
-                                context.stopService(Intent(context, BackendService::class.java).apply {
-                                    action = BackendService.ACTION_STOP
-                                })
-                            }
-                        },
                     )
                     BottomTab.Upscale -> UpscaleTopBar(
                         drawerState = drawerState,
@@ -713,6 +829,13 @@ private fun AppContent() {
                         onUnloadUpscaleModel = { unloadUpscaleModel() },
                         persistedUpscalerId = persistedUpscalerId,
                     )
+                    BottomTab.Queue -> TabQueueScreen(
+                        tasks = queueTasks,
+                        batchGroups = queueBatchGroups,
+                        processingActive = queueProcessing,
+                        onRemoveTask = { queueRepository.removeTask(it) },
+                        onRemoveBatch = { queueRepository.removeBatch(it) },
+                    )
                     BottomTab.Generate -> TabGenerateScreen(
                         modelId = if (isModelLoaded) selectedModelId else null,
                         prompt = genPrompt,
@@ -737,9 +860,29 @@ private fun AppContent() {
                         onWidthChange = { genWidth = it },
                         height = genHeight,
                         onHeightChange = { genHeight = it },
-                        generateTrigger = genGenerateTrigger,
-                        onBatchIndexChange = { genBatchIndex = it },
-                        onBatchJobChange = { genBatchJob = it },
+                        onAddToQueue = { count ->
+                            val modelId = if (isModelLoaded) selectedModelId else return@TabGenerateScreen
+                            queueRepository.addBatch(
+                                modelId = modelId,
+                                prompt = genPrompt,
+                                negativePrompt = genNegativePrompt,
+                                steps = genSteps.roundToInt(),
+                                cfg = genCfg,
+                                seed = genSeed,
+                                width = genWidth,
+                                height = genHeight,
+                                effectiveWidth = genWidth,
+                                effectiveHeight = genHeight,
+                                denoiseStrength = genDenoiseStrength,
+                                useOpenCL = genUseOpenCL,
+                                scheduler = genScheduler,
+                                aspectRatio = inferAspectRatioString(genWidth, genHeight),
+                                count = count.coerceAtLeast(1),
+                            )
+                            snackbarHostState.showSnackbar(
+                                context.getString(R.string.added_to_queue, count)
+                            )
+                        },
                     )
                     BottomTab.Upscale -> UpscaleScreen()
                     BottomTab.Browse -> BrowseScreen()
@@ -862,43 +1005,43 @@ private fun ModelsTopBar(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+private fun QueueTopBar(drawerState: DrawerState) {
+    val scope = rememberCoroutineScope()
+    TopAppBar(
+        title = {
+            Text(
+                text = "Queue",
+                maxLines = 1,
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                Icon(Icons.Default.Menu, stringResource(R.string.settings))
+            }
+        },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
 private fun GenerateTopBar(
     drawerState: DrawerState,
     modelId: String?,
     isModelLoaded: Boolean,
-    batchCounts: Int = 1,
-    batchIndex: Int = 0,
-    isRunning: Boolean = false,
-    onGenerate: () -> Unit = {},
-    onStop: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val modelRepository = remember { ModelRepository(context) }
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
 
-    var showNoModelWarning by remember { mutableStateOf(false) }
-    if (showNoModelWarning) {
-        AlertDialog(
-            onDismissRequest = { showNoModelWarning = false },
-            title = { Text(stringResource(R.string.no_model_loaded)) },
-            text = { Text(stringResource(R.string.no_model_loaded_hint)) },
-            confirmButton = {
-                TextButton(onClick = { showNoModelWarning = false }) {
-                    Text(stringResource(R.string.got_it))
-                }
-            },
-        )
-    }
-
     TopAppBar(
         title = {
-            if (isModelLoaded && model != null && !isRunning) {
+            if (isModelLoaded && model != null) {
                 Text(
                     text = model.name,
                     maxLines = 1,
                 )
-            } else if (!isModelLoaded && !isRunning) {
+            } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Default.Report,
@@ -917,64 +1060,8 @@ private fun GenerateTopBar(
             }
         },
         navigationIcon = {
-            if (isRunning) {
-                // Batch progress on the LEFT (near hamburger icon)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                        Icon(Icons.Default.Menu, stringResource(R.string.settings))
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        Icons.Default.Collections,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "${batchIndex.coerceAtLeast(1)} / $batchCounts",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                    Icon(Icons.Default.Menu, stringResource(R.string.settings))
-                }
-            }
-        },
-        actions = {
-            if (isRunning) {
-                // Spinner + stop button on the RIGHT
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .size(24.dp),
-                        strokeWidth = 2.dp,
-                    )
-                    IconButton(onClick = onStop) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = stringResource(R.string.stop_generation),
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                }
-            } else {
-                TextButton(
-                    onClick = {
-                        if (!isModelLoaded || modelId == null) {
-                            showNoModelWarning = true
-                        } else {
-                            onGenerate()
-                        }
-                    },
-                ) {
-                    Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.generate_image))
-                }
+            IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                Icon(Icons.Default.Menu, stringResource(R.string.settings))
             }
         },
     )
@@ -1121,6 +1208,9 @@ private fun ModelListTab(
             }
 
             // ---- Upscale Models Section (downloaded/imported only) ----
+            val downloadedUpscalers = remember(upscalerRepository.upscalers) {
+                upscalerRepository.upscalers.filter { it.isDownloaded }
+            }
             if (downloadedUpscalers.isNotEmpty()) {
                 item(key = "upscale_header") {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
@@ -1372,11 +1462,8 @@ private fun TabGenerateScreen(
     onWidthChange: (Int) -> Unit,
     height: Int,
     onHeightChange: (Int) -> Unit,
-    generateTrigger: Int = 0,
-    onBatchIndexChange: (Int) -> Unit = {},
-    onBatchJobChange: (kotlinx.coroutines.Job?) -> Unit = {},
+    onAddToQueue: (Int) -> Unit = {},
 ) {
-    // Reuse the GenerateScreen from the separate file, with all parameters
     GenerateScreen(
         modelId = modelId,
         prompt = prompt,
@@ -1401,9 +1488,26 @@ private fun TabGenerateScreen(
         onWidthChange = onWidthChange,
         height = height,
         onHeightChange = onHeightChange,
-        generateTrigger = generateTrigger,
-        onBatchIndexChange = onBatchIndexChange,
-        onBatchJobChange = onBatchJobChange,
+        onAddToQueue = onAddToQueue,
+    )
+}
+
+// =========== Queue Tab ===========
+
+@Composable
+private fun TabQueueScreen(
+    tasks: List<GenerationTask>,
+    batchGroups: List<BatchGroupDisplay>,
+    processingActive: Boolean,
+    onRemoveTask: (String) -> Unit,
+    onRemoveBatch: (String) -> Unit,
+) {
+    QueueScreen(
+        tasks = tasks,
+        batchGroups = batchGroups,
+        processingActive = processingActive,
+        onRemoveTask = onRemoveTask,
+        onRemoveBatch = onRemoveBatch,
     )
 }
 

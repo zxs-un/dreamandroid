@@ -1,15 +1,11 @@
 package io.github.dreamandroid.local.ui.screens
 
 import android.content.Context
-import android.content.Intent
-import android.graphics.Bitmap
 import android.util.Log
-import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -18,12 +14,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-// import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-// import androidx.compose.ui.focus.FocusRequester
-// import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.*
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -33,25 +25,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
 import io.github.dreamandroid.local.R
 import io.github.dreamandroid.local.data.*
-import io.github.dreamandroid.local.service.BackendService
-import io.github.dreamandroid.local.service.BackgroundGenerationService
-import io.github.dreamandroid.local.ui.components.SmoothLinearWavyProgressIndicator
-import io.github.dreamandroid.local.utils.saveImage
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -95,8 +76,9 @@ private suspend fun tokenizePromptForGenerate(text: String): GenerateTokenizeRes
 }
 
 /**
- * GenerateScreen – image generation with flattened advanced settings.
+ * GenerateScreen – image generation parameter configuration.
  * All generation parameters are managed by the parent (MainActivity) and passed down.
+ * When the user clicks Generate, parameters are sent to the Queue for background processing.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -126,19 +108,14 @@ fun GenerateScreen(
     onWidthChange: (Int) -> Unit,
     height: Int,
     onHeightChange: (Int) -> Unit,
-    // Batch generation control (from parent)
-    generateTrigger: Int = 0,
-    onBatchIndexChange: (Int) -> Unit = {},
-    onBatchJobChange: (Job?) -> Unit = {},
+    // Queue interaction — sends current params to the queue
+    onAddToQueue: (Int) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
     val modelRepository = remember { ModelRepository(context) }
-    val historyManager = remember { HistoryManager(context) }
     val model = remember(modelId) { modelRepository.models.find { it.id == modelId } }
-    val backendState by BackendService.backendState.collectAsState()
-    val serviceState by BackgroundGenerationService.generationState.collectAsState()
     val generationPreferences = remember { GenerationPreferences(context) }
 
     // ---- Token count / CLIP limit (77 tokens) ----
@@ -149,10 +126,22 @@ fun GenerateScreen(
     var promptOverflowOffset by remember { mutableIntStateOf(-1) }
     var negativePromptOverflowOffset by remember { mutableIntStateOf(-1) }
 
-    val view = LocalView.current
-    DisposableEffect(view) {
-        view.keepScreenOn = true
-        onDispose { view.keepScreenOn = false }
+    // ---- Queue add feedback ----
+    var queueAddMessage by remember { mutableStateOf<String?>(null) }
+
+    // ---- No model warning ----
+    var showNoModelWarning by remember { mutableStateOf(false) }
+    if (showNoModelWarning) {
+        AlertDialog(
+            onDismissRequest = { showNoModelWarning = false },
+            title = { Text(stringResource(R.string.no_model_loaded)) },
+            text = { Text(stringResource(R.string.no_model_loaded_hint)) },
+            confirmButton = {
+                TextButton(onClick = { showNoModelWarning = false }) {
+                    Text(stringResource(R.string.got_it))
+                }
+            },
+        )
     }
 
     // Load preferences for this model
@@ -161,8 +150,6 @@ fun GenerateScreen(
             withContext(Dispatchers.IO) {
                 val prefs = generationPreferences.getPreferences(modelId).first()
                 withContext(Dispatchers.Main) {
-                    // prompt / negativePrompt / batchCounts: screen-level (global) values
-                    // take priority; fallback is handled by the parent (MainActivity).
                     if (prefs.steps > 0) onStepsChange(prefs.steps)
                     if (prefs.cfg > 0) onCfgChange(prefs.cfg)
                     if (prefs.seed.isNotEmpty()) onSeedChange(prefs.seed)
@@ -190,6 +177,14 @@ fun GenerateScreen(
         negativePromptTokenCount = result.count
         negativePromptTokenMax = result.maxLength
         negativePromptOverflowOffset = result.overflowOffset
+    }
+
+    // Clear queue feedback message after a delay
+    LaunchedEffect(queueAddMessage) {
+        if (queueAddMessage != null) {
+            delay(3000)
+            queueAddMessage = null
+        }
     }
 
     fun saveAllFields() {
@@ -221,243 +216,6 @@ fun GenerateScreen(
                 )
             }
         }
-    }
-
-    // ---- Generation state (single consumer) ----
-    var isRunning by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
-    var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var intermediateBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var generationStartTime by remember { mutableStateOf<Long?>(null) }
-    var returnedSeed by remember { mutableStateOf<Long?>(null) }
-
-    // Single consumer of generationState: handles UI updates + bitmap saving.
-    // Does NOT reset the service state — the batch loop below owns that.
-    LaunchedEffect(serviceState) {
-        when (val state = serviceState) {
-            is BackgroundGenerationService.GenerationState.Started -> {
-                // Service has accepted the request; clear previous error
-                errorMessage = null
-            }
-            is BackgroundGenerationService.GenerationState.Progress -> {
-                if (generationStartTime == null) generationStartTime = System.currentTimeMillis()
-                isRunning = true
-                progress = state.progress
-                state.intermediateImage?.let { intermediateBitmap = it }
-            }
-            is BackgroundGenerationService.GenerationState.Complete -> {
-                isRunning = false
-                progress = 0f
-                intermediateBitmap = null
-                state.bitmap?.let { currentBitmap = it }
-                state.seed?.let { returnedSeed = it }
-                val params = GenerationParameters(
-                    steps = steps.roundToInt(),
-                    cfg = cfg,
-                    seed = seed.toLongOrNull(),
-                    prompt = prompt,
-                    negativePrompt = negativePrompt,
-                    generationTime = generationStartTime?.let {
-                        ((System.currentTimeMillis() - it) / 1000).toString() + "s"
-                    },
-                    width = width,
-                    height = height,
-                    runOnCpu = model?.runOnCpu ?: false,
-                    denoiseStrength = denoiseStrength,
-                    useOpenCL = useOpenCL,
-                    scheduler = scheduler,
-                )
-                scope.launch(Dispatchers.IO) {
-                    state.bitmap?.let { bmp ->
-                        historyManager.saveGeneratedImage(
-                            modelId = modelId ?: "unknown",
-                            bitmap = bmp,
-                            params = params,
-                            mode = GenerationMode.TXT2IMG,
-                        )
-                    }
-                }
-                generationStartTime = null
-                // Notify the service that the bitmap has been safely consumed
-                // (saved to history). The batch loop will handle resetState().
-                BackgroundGenerationService.markBitmapConsumed()
-            }
-            is BackgroundGenerationService.GenerationState.Error -> {
-                isRunning = false
-                errorMessage = state.message
-                intermediateBitmap = null
-                generationStartTime = null
-                // Let the batch loop handle resetState() to avoid races.
-            }
-            is BackgroundGenerationService.GenerationState.Idle -> {}
-        }
-    }
-
-    // ---- Batch generation loop (Zero-Trust) ----
-    // Triggered by GenerateTopBar's "Generate" button via generateTrigger counter.
-    // This is the ONLY place that starts the service and manages the batch lifecycle.
-    // Every interaction is guarded: timeouts, retries, stale-state detection, forced resets.
-    LaunchedEffect(generateTrigger) {
-        if (generateTrigger == 0) return@LaunchedEffect
-        val job = scope.launch {
-            val actualBatchCount = if (seed.isNotBlank()) 1 else batchCounts.coerceAtLeast(1)
-            for (i in 0 until actualBatchCount) {
-                // ---- Zero-Trust: Stale state detection before each iteration ----
-                BackgroundGenerationService.forceResetIfStale()
-
-                // ---- Zero-Trust: Backend health check with retry and auto-restart ----
-                val healthCheckRetryInterval = BackgroundGenerationService.getHealthCheckRetryIntervalMs(context)
-                val healthCheckMaxFails = BackgroundGenerationService.getHealthCheckMaxFailures(context)
-                var backendHealthy = false
-                var consecutiveFailures = 0
-                while (!backendHealthy) {
-                    backendHealthy = withContext(Dispatchers.IO) {
-                        BackgroundGenerationService.checkBackendHealth()
-                    }
-                    if (!backendHealthy) {
-                        consecutiveFailures++
-                        Log.w("GenerateScreen",
-                            "Backend health check failed ($consecutiveFailures/$healthCheckMaxFails)")
-
-                        if (consecutiveFailures >= healthCheckMaxFails) {
-                            Log.e("GenerateScreen",
-                                "Backend health check failed $consecutiveFailures times consecutively, restarting backend")
-                            try {
-                                withContext(Dispatchers.IO) {
-                                    context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
-                                    delay(500)
-                                    context.stopService(Intent(context, BackendService::class.java).apply {
-                                        action = BackendService.ACTION_STOP
-                                    })
-                                    delay(2000)
-                                    modelId?.let { mid ->
-                                        val restartIntent = Intent(context, BackendService::class.java).apply {
-                                            putExtra("modelId", mid)
-                                            putExtra("width", width)
-                                            putExtra("height", height)
-                                            putExtra("use_opencl", useOpenCL)
-                                        }
-                                        context.startForegroundService(restartIntent)
-                                    }
-                                }
-                                consecutiveFailures = 0
-                            } catch (e: Exception) {
-                                Log.e("GenerateScreen",
-                                    "Failed to restart backend: ${e.message}", e)
-                                errorMessage = context.getString(R.string.backend_not_healthy)
-                                break
-                            }
-                        }
-                        delay(healthCheckRetryInterval)
-                    }
-                }
-                if (!backendHealthy) {
-                    break
-                }
-
-                onBatchIndexChange(i + 1)
-
-                // ---- Retry loop for this batch item ----
-                var batchItemSucceeded = false
-                for (retryAttempt in 1..BackgroundGenerationService.MAX_RETRIES) {
-                    if (retryAttempt > 1) {
-                        Log.w("GenerateScreen", "Batch item $i retry $retryAttempt")
-                        delay(BackgroundGenerationService.RETRY_DELAY_MS)
-                        BackgroundGenerationService.forceResetIfStale()
-                    }
-
-                    val intent = Intent(context, BackgroundGenerationService::class.java).apply {
-                        putExtra("prompt", prompt)
-                        putExtra("negative_prompt", negativePrompt)
-                        putExtra("steps", steps.roundToInt())
-                        putExtra("cfg", cfg)
-                        seed.toLongOrNull()?.let { putExtra("seed", it) }
-                        putExtra("width", width)
-                        putExtra("height", height)
-                        putExtra("effective_width", width)
-                        putExtra("effective_height", height)
-                        putExtra("denoise_strength", denoiseStrength)
-                        putExtra("use_opencl", useOpenCL)
-                        putExtra("scheduler", scheduler)
-                        putExtra("aspect_ratio", inferAspectRatioString(width, height))
-                    }
-
-                    // Guard: if the batch was cancelled (user clicked stop),
-                    // do NOT start a new service request.
-                    if (!isActive) {
-                        Log.w("GenerateScreen", "Batch cancelled, not starting new request")
-                        break
-                    }
-                    context.startForegroundService(intent)
-
-                    // ---- Zero-Trust: Wait with timeout (not indefinite .first {}) ----
-                    val result = withTimeoutOrNull(BackgroundGenerationService.getServiceWaitTimeoutMs(context)) {
-                        BackgroundGenerationService.generationState
-                            .first { it is BackgroundGenerationService.GenerationState.Complete ||
-                                     it is BackgroundGenerationService.GenerationState.Error }
-                    }
-
-                    when {
-                        // Timeout — service may have hung, force reset and retry
-                        result == null -> {
-                            Log.w("GenerateScreen", "Batch item $i timed out after ${BackgroundGenerationService.getServiceWaitTimeoutMs(context)}ms")
-                            errorMessage = context.getString(R.string.generation_timeout_retry, retryAttempt)
-                            BackgroundGenerationService.resetState()
-                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
-                            continue // retry
-                        }
-                        // Success
-                        result is BackgroundGenerationService.GenerationState.Complete -> {
-                            batchItemSucceeded = true
-                            errorMessage = null
-                        }
-                        // Backend error — may be recoverable, retry
-                        result is BackgroundGenerationService.GenerationState.Error -> {
-                            Log.w("GenerateScreen", "Batch item $i error: ${result.message}")
-                            errorMessage = result.message
-                            BackgroundGenerationService.resetState()
-                            continue // retry
-                        }
-                    }
-
-                    // ---- Zero-Trust: Confirm bitmap consumed signal took effect ----
-                    val consumed = BackgroundGenerationService.markBitmapConsumed()
-                    if (!consumed) {
-                        Log.w("GenerateScreen", "markBitmapConsumed() did not take effect, retrying")
-                        delay(200)
-                        BackgroundGenerationService.markBitmapConsumed()
-                    }
-
-                    // ---- Zero-Trust: Wait for service to stop with timeout ----
-                    val serviceWaitTimeout = BackgroundGenerationService.getServiceWaitTimeoutMs(context)
-                    val waitStartTime = System.currentTimeMillis()
-                    while (BackgroundGenerationService.isServiceRunning.value) {
-                        if (System.currentTimeMillis() - waitStartTime > serviceWaitTimeout) {
-                            Log.w("GenerateScreen", "Service did not stop within timeout, forcing stop")
-                            context.sendBroadcast(Intent(BackgroundGenerationService.ACTION_STOP))
-                            delay(500)
-                            break
-                        }
-                        delay(100)
-                    }
-
-                    // ---- Zero-Trust: Always force-reset after each batch item ----
-                    BackgroundGenerationService.forceResetIfStale()
-
-                    if (batchItemSucceeded) break // exit retry loop on success
-                }
-
-                // If all retries exhausted for this batch item, stop the entire batch
-                if (!batchItemSucceeded) {
-                    Log.e("GenerateScreen", "Batch item $i failed after all retries, stopping batch")
-                    break
-                }
-            }
-            onBatchIndexChange(0)
-            onBatchJobChange(null)
-        }
-        onBatchJobChange(job)
     }
 
     // ---- UI ----
@@ -875,17 +633,23 @@ fun GenerateScreen(
                 },
             )
 
-            if (returnedSeed != null) {
-                FilledTonalButton(
-                    onClick = { onSeedChange(returnedSeed.toString()); saveAllFields() },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        stringResource(R.string.use_last_seed, returnedSeed.toString()),
-                    )
-                }
+            // ---- Add to Queue button ----
+            Button(
+                onClick = {
+                    if (modelId == null) {
+                        showNoModelWarning = true
+                        return@Button
+                    }
+                    val count = if (seed.isNotBlank()) 1 else batchCounts.coerceAtLeast(1)
+                    onAddToQueue(count)
+                    saveAllFields()
+                    queueAddMessage = "Added $count to queue"
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.generate_image))
             }
 
             // Reset button
@@ -910,18 +674,18 @@ fun GenerateScreen(
 
             HorizontalDivider()
 
-            // ---- Error message ----
+            // ---- Queue feedback message ----
             AnimatedVisibility(
-                visible = errorMessage != null,
+                visible = queueAddMessage != null,
                 enter = expandVertically() + fadeIn(),
                 exit = shrinkVertically() + fadeOut(),
             ) {
-                errorMessage?.let { msg ->
+                queueAddMessage?.let { msg ->
                     Card(
-                        onClick = { errorMessage = null },
+                        onClick = { queueAddMessage = null },
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
                         ),
                     ) {
                         Row(
@@ -930,129 +694,15 @@ fun GenerateScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
-                                Icons.Default.Error,
+                                Icons.Default.CheckCircle,
                                 null,
-                                tint = MaterialTheme.colorScheme.error,
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
                             Text(
                                 msg,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
-                        }
-                    }
-                }
-            }
-
-            // ---- Running indicator ----
-            AnimatedVisibility(
-                visible = isRunning,
-                enter = expandVertically() + fadeIn(),
-                exit = shrinkVertically() + fadeOut(),
-            ) {
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.generating),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        SmoothLinearWavyProgressIndicator(
-                            progress = progress,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(
-                            "${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        intermediateBitmap?.let { bitmap ->
-                            Card(
-                                shape = MaterialTheme.shapes.small,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(1f),
-                            ) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(context)
-                                        .data(bitmap)
-                                        .build(),
-                                    contentDescription = "Generation Preview",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Fit,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ---- Result ----
-            currentBitmap?.let { bitmap ->
-                ElevatedCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            stringResource(R.string.result_tab),
-                            style = MaterialTheme.typography.titleMedium,
-                        )
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(bitmap)
-                                .build(),
-                            contentDescription = "Generated image",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .aspectRatio(width.toFloat() / height),
-                            contentScale = ContentScale.Fit,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    scope.launch(Dispatchers.IO) {
-                                        saveImage(
-                                            context, bitmap,
-                                            onSuccess = {
-                                                Toast.makeText(
-                                                    context,
-                                                    context.getString(R.string.image_saved),
-                                                    Toast.LENGTH_SHORT,
-                                                ).show()
-                                            },
-                                            onError = { err ->
-                                                Toast.makeText(context, err, Toast.LENGTH_SHORT)
-                                                    .show()
-                                            },
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(Icons.Default.SaveAlt, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.save))
-                            }
-                            OutlinedButton(
-                                onClick = { currentBitmap = null },
-                                modifier = Modifier.weight(1f),
-                            ) {
-                                Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.close))
-                            }
                         }
                     }
                 }

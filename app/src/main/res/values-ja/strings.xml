@@ -328,11 +328,13 @@
 
     <!-- Bottom Navigation -->
     <string name="nav_models">モデル</string>
+    <string name="nav_queue">キュー</string>
     <string name="nav_generate">生成</string>
     <string name="nav_upscale">アップスケール</string>
     <string name="nav_browse">ギャラリー</string>
 
     <string name="stop_generation">生成停止</string>
+    <string name="added_to_queue">%d 件のタスクをキューに追加しました</string>
     <string name="no_model_loaded">モデル未読み込み</string>
     <string name="generate_model_not_loaded">生成モデル未読み込み</string>
     <string name="upscale_model_not_loaded">アップスケールモデル未読み込み</string>

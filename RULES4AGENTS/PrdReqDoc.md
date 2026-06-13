@@ -1,8 +1,8 @@
 # DreamHub Product Requirements Document (PRD)
 
-> 版本: 1.0  
-> 更新日期: 2026-06-13  
-> 本文档描述 DreamHub Android 应用的完整产品架构与功能需求。
+> 版本: 2.0
+> 更新日期: 2026-06-13
+> 本文档描述 DreamHub Android 应用的完整产品架构、模块接口标准与技术规范。
 
 ---
 
@@ -587,9 +587,682 @@ app/src/main/java/io/github/dreamandroid/local/
 
 ---
 
-## 10. 变更记录
+## 10. 目标架构设计
+
+> 本章定义重构后的目标架构，包含分层设计、模块依赖、接口契约和技术规范。
+> 当前实现的问题清单与优化方案详见 `ArchitectureReview.md`。
+
+### 10.1 架构全景图
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Android App Layer                            │
+│                                                                     │
+│  ┌──────────────────────────────────────────────────────────────┐   │
+│  │                    Presentation (UI)                          │   │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────┐ ┌───────┐  │   │
+│  │  │ Models   │ │ Generate │ │  Queue   │ │Upscl │ │Browse │  │   │
+│  │  │ Screen   │ │ Screen   │ │  Screen  │ │Screen│ │Screen │  │   │
+│  │  └────┬─────┘ └────┬─────┘ └────┬─────┘ └──┬───┘ └──┬────┘  │   │
+│  │       │             │           │          │        │       │   │
+│  │  ┌────┴─────────────┴───────────┴──────────┴────────┴────┐  │   │
+│  │  │                    ViewModels                          │  │   │
+│  │  │  ModelsVM  GenerateVM  QueueVM  UpscaleVM  BrowseVM    │  │   │
+│  │  └────────────────────────┬───────────────────────────────┘  │   │
+│  └───────────────────────────┼──────────────────────────────────┘   │
+│                              │                                      │
+│  ┌───────────────────────────┼──────────────────────────────────┐   │
+│  │                    Service Layer (Domain)                     │   │
+│  │  ┌────────────────────┐   │   ┌──────────────────────────┐   │   │
+│  │  │  BackendManager    │←──┼──→│  QueueProcessingService  │   │   │
+│  │  │  ┌──────────────┐  │   │   │  ┌───────────────────┐   │   │   │
+│  │  │  │ HttpClient   │  │   │   │  │  SseStreamParser  │   │   │   │
+│  │  │  │ HealthCheck  │  │   │   │  │  QueueRepository  │   │   │   │
+│  │  │  │ ProcessMgr   │  │   │   │  │  HistoryManager   │   │   │   │
+│  │  │  │ RuntimePrep  │  │   │   │  └───────────────────┘   │   │   │
+│  │  │  └──────────────┘  │   │   └──────────────────────────┘   │   │
+│  │  └────────────────────┘   │                                    │   │
+│  └───────────────────────────┼────────────────────────────────────┘   │
+│                              │                                      │
+│  ┌───────────────────────────┼──────────────────────────────────┐   │
+│  │                      Data Layer                              │   │
+│  │  ┌──────────────┐ ┌──────┴───────┐ ┌────────────────────┐   │   │
+│  │  │ ModelRepo    │ │ HistoryRepo  │ │ PreferencesManager │   │   │
+│  │  │ (Room+Files) │ │ (Room)       │ │ (DataStore)        │   │   │
+│  │  └──────────────┘ └──────────────┘ └────────────────────┘   │   │
+│  └──────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+                              │ HTTP (OkHttp, single client)
+                              ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│              C++ Backend (libstable_diffusion_core.so)               │
+│              http://localhost:8081                                   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐             │
+│  │ /health  │ │/generate │ │/upscale  │ │/tokenize │             │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 分层架构原则
+
+| 层 | 职责 | 依赖方向 | 约束 |
+|----|------|---------|------|
+| **Presentation** | Compose UI + ViewModels | → Service Layer | 不直接调用 HTTP，不直接操作文件系统 |
+| **Service** | 业务逻辑编排、进程管理、队列调度 | → Data Layer | 不持有 UI 引用，通过 StateFlow 暴露状态 |
+| **Data** | Room DAO、Preferences、文件 I/O | → 无外部依赖 | 不引用 Service 或 UI 层 |
+
+**核心原则：**
+
+1. **单向依赖：** Presentation → Service → Data。下层不知道上层的存在。
+2. **StateFlow 通信：** Service 层通过 `StateFlow` 暴露状态给 ViewModel，ViewModel 通过 `collectAsState()` 驱动 UI。
+3. **Single Source of Truth：** Room 是模型/历史数据的唯一数据源；文件系统仅为存储位置。
+4. **协程安全：** 所有 I/O 操作必须在 `Dispatchers.IO` 中执行；禁止 `runBlocking` 出现在主线程调用路径上。
+5. **统一错误模型：** 所有错误通过 `sealed class AppError` 体系传播（见 12.1 节）。
+
+### 10.3 数据流全景图
+
+```
+┌──────────┐    StateFlow        ┌──────────┐    suspend/Flow    ┌──────────────┐
+│  Compose │←───────────────────│ViewModel │←───────────────────│ Service      │
+│  UI      │   collectAsState()  │          │   launch/call      │ (BackendMgr  │
+│          │                     │          │                    │  QueueProc)  │
+│          │  events             │          │  domain types      │              │
+│          │────────────────────→│          │───────────────────→│              │
+│          │  button.onClick()   │          │  vm.onAction()     │              │
+└──────────┘                     └──────────┘                    └──────┬───────┘
+                                                                       │
+                                                                   suspend
+                                                                       │
+                                                                       ▼
+                                                                ┌──────────────┐
+                                                                │ Data Layer   │
+                                                                │ Room / Files │
+                                                                └──────────────┘
+
+                    ┌──────────────┐    HTTP (OkHttp)
+                    │ C++ Backend  │←─────────────────── BackendManager.httpClient
+                    │ :8081        │   POST /generate   (single client, shared pool)
+                    └──────────────┘   GET /health
+                                       POST /tokenize
+                                       POST /upscale
+```
+
+### 10.4 模块间接口交互流（队列生成场景）
+
+```
+User taps "Add to Queue"
+  │
+  ▼
+GenerateScreen ──── action ────→ GenerateViewModel.addToQueue()
+                                      │
+                                      ▼
+                                  QueueRepository.addBatch(tasks)
+                                      │
+                                      │ StateFlow emit
+                                      ▼
+                                  QueueScreen ← observe ← QueueViewModel
+                                      │
+                                      │ (QueueProcessingService watches QueueRepository)
+                                      ▼
+┌─── QueueProcessingService (Foreground) ──────────────────────────────┐
+│                                                                      │
+│  for each PENDING task:                                              │
+│    1. backendManager.healthCheck()                                   │
+│       │                                                              │
+│       ├── OK ─────────────────────────────────────────────────┐      │
+│       └── FAIL → backendManager.restart() → healthCheck() → ──┘      │
+│                                                                      │
+│    2. backendManager.httpClient                                     │
+│       .newCall(POST /generate, body=task.params)                     │
+│       │                                                              │
+│       ▼                                                              │
+│    3. SseStreamParser(response.body.byteStream())                    │
+│       ┌─ SseEvent.Progress(step, total, imageBase64)                 │
+│       │   → decode → queueRepository.updateTaskProgress()            │
+│       │   → notify notification (progress bar)                       │
+│       │                                                              │
+│       └─ SseEvent.Complete(imageBase64, seed, w, h)                  │
+│           → decode → Bitmap                                          │
+│           → historyManager.save(record)                              │
+│           → queueRepository.markComplete(taskId, bitmap)             │
+│           → bitmap.recycle()                                         │
+│                                                                      │
+│    4. on Error / Timeout / Exception:                                │
+│       → queueRepository.markError(taskId, AppError.xxx)              │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### 10.5 模块间接口交互流（Upscale 场景）
+
+```
+User selects image → UpscaleScreen ──── action ────→ UpscaleViewModel.upscale()
+                                                           │
+                                                           ▼
+                                                   backendManager.startUpscaler(id)
+                                                   │ (内部自动 stop diffusion → start upscaler)
+                                                   │
+                                                   ▼
+                                                   backendManager.httpClient
+                                                   .newCall(POST /upscale, body=RGB bytes)
+                                                   │
+                                                   ├── OK → Bitmap → UpscaleViewModel.result
+                                                   │
+                                                   └── Error → AppError.Network/Backend
+```
+
+---
+
+## 11. 核心模块接口标准
+
+### 11.1 BackendManager — 后端进程管理器
+
+```kotlin
+/**
+ * 统一的后端进程管理器。
+ * 保证同一时刻只有一个 C++ 进程在端口 8081 上运行。
+ */
+interface BackendManager {
+
+    enum class Mode { Diffusion, Upscaler }
+
+    sealed class State {
+        object Idle : State()
+        data class Starting(val mode: Mode, val modelId: String) : State()
+        data class Running(val mode: Mode, val modelId: String) : State()
+        data class Error(val message: String) : State()
+    }
+
+    /** 当前状态流（必须从 Dispatchers.Main 收集） */
+    val state: StateFlow<State>
+
+    /** 统一 HTTP 客户端（共享连接池、超时配置） */
+    val httpClient: OkHttpClient
+
+    // ── 生命周期管理 ──
+
+    /** 启动 Diffusion 模式后端。内部自动处理旧进程停止。 */
+    suspend fun startDiffusion(
+        modelId: String,
+        width: Int,
+        height: Int,
+        useOpenCL: Boolean
+    ): Result<Unit>
+
+    /** 启动 Upscaler 模式后端。内部自动处理旧进程停止。 */
+    suspend fun startUpscaler(upscalerId: String): Result<Unit>
+
+    /**
+     * 优雅停止当前进程：
+     * 1. SIGTERM → waitFor(5s)
+     * 2. 超时 → destroyForcibly() → waitFor()
+     * 3. 进程退出 → process = null → state = Idle
+     */
+    suspend fun stop()
+
+    // ── 健康检查 ──
+
+    /** GET /health，复用 httpClient */
+    suspend fun healthCheck(): Boolean
+
+    /** 带重试的健康检查 */
+    suspend fun healthCheckWithRetry(
+        maxRetries: Int = 4,
+        intervalSeconds: Long = 20
+    ): Boolean
+
+    // ── 业务端点 ──
+
+    /** POST /generate → SSE streaming */
+    fun generate(params: GenerateParams): Flow<SseEvent>
+
+    /** POST /tokenize */
+    suspend fun tokenize(prompt: String): TokenizeResult
+
+    /** POST /upscale */
+    suspend fun upscale(
+        rgbBytes: ByteArray,
+        width: Int,
+        height: Int,
+        upscalerPath: String
+    ): ByteArray
+}
+```
+
+**接口约束：**
+- `state` 必须在 IO 线程更新，Main 线程收集
+- `startXxx()` 返回值 `Result<Unit>` 统一错误处理，不抛异常
+- `stop()` 必须等待进程真正退出后才返回（防止僵尸进程）
+- `httpClient` 全局唯一，在 `DreamAndroidApplication.onCreate()` 中初始化
+
+### 11.2 QueueProcessingService — 队列处理服务
+
+```kotlin
+/**
+ * 前台服务，顺序处理生成队列。
+ * 生命周期：当队列有 PENDING 任务时保持运行，队列空后 stopSelf()。
+ */
+class QueueProcessingService : Service() {
+
+    // 通过 Application 获取依赖
+    private val backendManager: BackendManager
+        get() = (application as DreamAndroidApplication).backendManager
+    private val queueRepository: QueueRepository
+        get() = (application as DreamAndroidApplication).queueRepository
+    private val historyManager: HistoryManager
+        get() = (application as DreamAndroidApplication).historyManager
+
+    /** 处理中标志，用于外部判断是否繁忙 */
+    val isProcessing: StateFlow<Boolean>
+
+    /** 当前处理进度 0f..1f */
+    val currentProgress: StateFlow<Float>
+
+    // ── 内部处理循环 ──
+
+    private suspend fun processLoop() {
+        while (true) {
+            val task = queueRepository.getNextPending() ?: break
+            queueRepository.markProcessing(task.id)
+
+            // 1. 健康检查
+            if (!backendManager.healthCheckWithRetry()) {
+                queueRepository.markError(task.id, AppError.Backend("Health check failed"))
+                continue
+            }
+
+            // 2. 发起生成请求
+            try {
+                backendManager.generate(task.toParams()).collect { event ->
+                    when (event) {
+                        is SseEvent.Progress -> {
+                            queueRepository.updateProgress(task.id, event.step.toFloat() / event.total)
+                            currentProgress.value = event.step.toFloat() / event.total
+                        }
+                        is SseEvent.Complete -> {
+                            val bitmap = decode(event.imageBase64)
+                            historyManager.save(task.toRecord(bitmap))
+                            queueRepository.markComplete(task.id, bitmap)
+                            bitmap.recycle()
+                        }
+                        is SseEvent.Error -> {
+                            queueRepository.markError(task.id, AppError.Backend(event.message))
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                queueRepository.markError(task.id, AppError.from(e))
+            }
+        }
+        stopSelf()
+    }
+}
+```
+
+### 11.3 SseStreamParser — SSE 流解析器
+
+```kotlin
+/**
+ * 独立可测试的 SSE 流解析器。
+ * 从 InputStream 逐行读取，解析为结构化事件流。
+ */
+class SseStreamParser(
+    private val inputStream: InputStream
+) {
+    sealed class SseEvent {
+        data class Progress(
+            val step: Int,
+            val totalSteps: Int,
+            val imageBase64: String
+        ) : SseEvent()
+
+        data class Complete(
+            val imageBase64: String,
+            val seed: Long,
+            val width: Int,
+            val height: Int
+        ) : SseEvent()
+
+        data class Error(val message: String) : SseEvent()
+    }
+
+    /**
+     * 返回冷 Flow，收集时开始解析，取消时关闭流。
+     * 线程安全：必须在 IO Dispatcher 上收集。
+     */
+    fun events(): Flow<SseEvent> = flow {
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        reader.use {
+            var line: String?
+            while (reader.readLine().also { line = it } != null) {
+                val l = line ?: continue
+                if (l.startsWith("data: ")) {
+                    val json = l.removePrefix("data: ")
+                    if (json == "[DONE]") break
+                    emit(parseEvent(json))
+                }
+            }
+        }
+    }
+
+    private fun parseEvent(json: String): SseEvent {
+        val obj = JSONObject(json)
+        return when (obj.getString("type")) {
+            "progress" -> SseEvent.Progress(
+                step = obj.getInt("step"),
+                totalSteps = obj.getInt("total_steps"),
+                imageBase64 = obj.getString("image")
+            )
+            "complete" -> SseEvent.Complete(
+                imageBase64 = obj.getString("image"),
+                seed = obj.optLong("seed"),
+                width = obj.getInt("width"),
+                height = obj.getInt("height")
+            )
+            "error" -> SseEvent.Error(obj.getString("message"))
+            else -> SseEvent.Error("Unknown event type: ${obj.getString("type")}")
+        }
+    }
+}
+```
+
+### 11.4 数据层接口
+
+```kotlin
+// ── QueueRepository ──
+interface QueueRepository {
+    val tasks: StateFlow<List<GenerationTask>>
+    val batchGroups: StateFlow<List<BatchGroupDisplay>>
+
+    suspend fun addBatch(tasks: List<GenerationTask>)
+    suspend fun getNextPending(): GenerationTask?
+    suspend fun markProcessing(taskId: String)
+    suspend fun markComplete(taskId: String, bitmap: Bitmap)
+    suspend fun markError(taskId: String, error: AppError)
+    suspend fun updateProgress(taskId: String, progress: Float)
+    suspend fun removeTask(taskId: String)
+    suspend fun cancelAllPending()
+}
+
+// ── HistoryManager ──
+interface HistoryManager {
+    fun getHistory(modelId: String? = null): Flow<List<HistoryRecord>>
+    suspend fun save(record: HistoryRecord)
+    suspend fun delete(recordId: Long)
+    suspend fun deleteMultiple(ids: List<Long>)
+    suspend fun clearForModel(modelId: String)
+}
+
+// ── ModelRepository ──
+interface ModelRepository {
+    fun observeModels(): Flow<List<ModelEntity>>      // 单一数据源：Room
+    suspend fun deleteModel(modelId: String)           // 事务内删 Room + 文件
+    suspend fun importModel(source: Uri): ModelEntity
+    suspend fun renameModel(modelId: String, newName: String)
+}
+
+// ── PreferencesManager ──
+interface PreferencesManager {
+    // 全局生成参数
+    val prompt: Flow<String>
+    val negativePrompt: Flow<String>
+    val batchCount: Flow<Int>
+    // ... 所有 key 集中定义
+    suspend fun setPrompt(value: String)
+}
+```
+
+---
+
+## 12. 技术规范
+
+### 12.1 统一错误模型
+
+```kotlin
+/** 应用层统一错误类型 */
+sealed class AppError(
+    override val message: String,
+    open val cause: Throwable? = null
+) : Exception(message) {
+
+    /** 网络层错误（连接超时、DNS、HTTP error） */
+    data class Network(
+        override val message: String,
+        val code: Int? = null,
+        override val cause: Throwable? = null
+    ) : AppError(message, cause)
+
+    /** 后端业务错误（400/500 + message from JSON） */
+    data class Backend(
+        override val message: String
+    ) : AppError(message)
+
+    /** 数据解析错误（JSON、SSE、Bitmap decode） */
+    data class Parse(
+        override val message: String,
+        override val cause: Throwable? = null
+    ) : AppError(message, cause)
+
+    /** 存储错误（Room、文件 I/O） */
+    data class Storage(
+        override val message: String,
+        override val cause: Throwable? = null
+    ) : AppError(message, cause)
+
+    companion object {
+        fun from(e: Throwable): AppError = when (e) {
+            is AppError -> e
+            is IOException -> Network(e.message ?: "IO Error", cause = e)
+            is JSONException -> Parse(e.message ?: "Parse Error", cause = e)
+            else -> Backend(e.message ?: "Unknown Error")
+        }
+    }
+}
+```
+
+**错误传播约定：**
+
+| 来源 | 转换规则 | 终端处理 |
+|------|---------|---------|
+| OkHttp IOException | → `AppError.Network` | ViewModel 转为 UI 状态 (Snackbar / 错误卡片) |
+| HTTP 4xx/5xx + JSON message | → `AppError.Backend` | 同上 |
+| SSE parse 失败 (JSONException) | → `AppError.Parse` | 同上 |
+| Room / File I/O 异常 | → `AppError.Storage` | 同上 |
+| Health check 失败 | 静默重试 (≤ maxRetries)，超限后 → `AppError.Backend` | 通知用户后端不可用 |
+
+### 12.2 OkHttpClient 配置标准
+
+```kotlin
+/** 全局唯一 HTTP 客户端配置 */
+fun createHttpClient(): OkHttpClient = OkHttpClient.Builder()
+    .connectTimeout(3, TimeUnit.SECONDS)       // 建连 3s
+    .readTimeout(3600, TimeUnit.SECONDS)        // 读取 60min（生成耗时）
+    .writeTimeout(30, TimeUnit.SECONDS)         // 写入 30s
+    .callTimeout(0, TimeUnit.SECONDS)           // 不限总时间
+    .connectionPool(ConnectionPool(5, 1, TimeUnit.MINUTES))
+    .retryOnConnectionFailure(true)
+    .addInterceptor(HttpLoggingInterceptor().apply {
+        level = if (BuildConfig.DEBUG) Level.BODY else Level.NONE
+    })
+    .build()
+```
+
+**端点超时覆盖（特殊端点需要更短超时）：**
+
+| 端点 | readTimeout 覆盖 |
+|------|-----------------|
+| `GET /health` | 3s (短连接，纯状态返回) |
+| `POST /tokenize` | 5s |
+| `POST /generate` | 3600s (默认) |
+| `POST /upscale` | 300s |
+
+### 12.3 协程管理规范
+
+```kotlin
+// ✅ 正确：Service 层使用明确的 Job + 生命周期取消
+class QueueProcessingService : Service() {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    
+    override fun onDestroy() {
+        scope.cancel()  // 必须取消
+        super.onDestroy()
+    }
+}
+
+// ✅ 正确：ViewModel 使用 viewModelScope
+class GenerateViewModel : ViewModel() {
+    fun load() {
+        viewModelScope.launch(Dispatchers.IO) { /* ... */ }
+    }
+}
+
+// ❌ 禁止：无 Job 的 fire-and-forget scope
+// private val scope = CoroutineScope(Dispatchers.IO)  // 无法取消！
+
+// ❌ 禁止：主线程调用 runBlocking
+// fun onClick() { runBlocking { dao.delete() } }  // ANR!
+
+// ✅ 正确：主线程 → launch 协程
+// fun onClick() { viewModelScope.launch { dao.delete() } }
+```
+
+### 12.4 Bitmap 生命周期规范
+
+```
+生成/超分 Bitmap 生命周期：
+  创建 (decode base64/bytes)
+    ↓
+  使用 (UI 渲染)
+    ↓
+  消费后 → bitmap.recycle() + 置 null
+
+规则：
+1. 每个 Bitmap 只有一个生产者，一个消费者
+2. QueueProcessingService 产生的 Bitmap：UI 渲染后由 ViewModel 负责 recycle()
+3. Upscale 产生的 Bitmap：渲染后由 UpscaleViewModel 负责 recycle()
+4. 所有中间 Bitmap（SSE progress preview）立即 recycle()
+5. LruCache 最大缓存 3 个全分辨率 Bitmap (3 × 64MB = 192MB)
+```
+
+### 12.5 原生进程生命周期规范
+
+```
+进程启动流程：
+  1. prepareRuntimeDir()                         [一次性，Application.onCreate]
+  2. ProcessBuilder.start()                      [IO 线程]
+  3. 等待 GET /health 返回 200                   [轮询，最多 30s]
+  4. state = Running(mode, modelId)              [发出 StateFlow]
+
+进程停止流程（优雅关闭）：
+  1. process.destroy()                           [SIGTERM]
+  2. process.waitFor(5, TimeUnit.SECONDS)        [等待 5s]
+  3. if 超时: process.destroyForcibly()          [SIGKILL]
+  4. process.waitFor()                           [确认退出]
+  5. process = null                              [清空引用]
+  6. state = Idle                                [发出 StateFlow]
+
+规则：
+- 启动/停止全程在 IO 线程执行
+- 所有 StateFlow 更新必须是原子操作
+- 进程退出后才允许下一次启动
+```
+
+### 12.6 Preferences → DataStore 迁移规范
+
+```
+当前: 3 个 SharedPreferences 文件
+  - app_prefs         (GenerationPreferences)
+  - upscaler_prefs    (UpscaleScreen)
+  - default           (HistoryManager etc.)
+
+目标: 1 个 Preferences DataStore
+  - 统一 key 命名空间
+  - 类型安全访问
+  - Flow-based 观察
+
+迁移策略：
+  1. Phase 1: 新建 PreferencesManager，平行写入旧 SP + 新 DataStore
+  2. Phase 2: 读全部切换为 DataStore
+  3. Phase 3: 去除旧 SP 写入
+  4. Phase 4: 清理旧 SP 文件
+```
+
+---
+
+## 13. 目标文件结构
+
+```
+app/src/main/java/io/github/dreamandroid/local/
+├── DreamAndroidApplication.kt          # DI 容器，持有全部 Service 引用
+│
+├── core/                               # 核心接口与类型
+│   ├── error/
+│   │   └── AppError.kt                 # 统一错误密封类
+│   └── model/
+│       ├── GenerateParams.kt           # 生成参数 DTO
+│       ├── QueueModels.kt              # GenerationTask/BatchGroupDisplay
+│       └── Constants.kt                # 全局常量 (端口、路径等)
+│
+├── service/                            # 服务层（业务逻辑）
+│   ├── backend/
+│   │   ├── BackendManager.kt           # 统一后端管理器（接口 + 实现）
+│   │   └── RuntimeDirPreparer.kt       # QNN 运行时准备（单份代码）
+│   ├── queue/
+│   │   ├── QueueProcessingService.kt   # 队列处理前台服务
+│   │   ├── QueueRepository.kt          # 队列状态管理（Room 持久化）
+│   │   └── SseStreamParser.kt          # SSE 流解析器（可单测）
+│   ├── http/
+│   │   └── HttpClientProvider.kt       # OkHttpClient 单例工厂
+│   └── download/
+│       └── ModelDownloadService.kt     # 模型下载服务
+│
+├── data/                               # 数据层
+│   ├── db/
+│   │   ├── AppDatabase.kt             # Room Database
+│   │   ├── HistoryDao.kt              # 历史记录 DAO
+│   │   ├── QueueDao.kt                # 队列持久化 DAO
+│   │   └── ModelDao.kt                # 模型元数据 DAO
+│   ├── repository/
+│   │   ├── HistoryRepository.kt       # 历史记录仓库
+│   │   ├── ModelRepository.kt         # 模型仓库 (SSOT: Room)
+│   │   └── PreferencesManager.kt      # DataStore 统一管理
+│   └── entity/
+│       ├── HistoryEntity.kt
+│       ├── QueueEntity.kt
+│       └── ModelEntity.kt
+│
+├── ui/                                 # 表现层
+│   ├── MainActivity.kt                 # 入口 Activity（轻量，仅导航）
+│   ├── navigation/
+│   │   └── Navigation.kt              # 路由定义
+│   ├── viewmodel/
+│   │   ├── MainViewModel.kt
+│   │   ├── ModelsViewModel.kt
+│   │   ├── GenerateViewModel.kt
+│   │   ├── QueueViewModel.kt
+│   │   ├── UpscaleViewModel.kt
+│   │   └── BrowseViewModel.kt
+│   ├── screens/
+│   │   ├── models/
+│   │   ├── generate/
+│   │   ├── queue/
+│   │   ├── upscale/
+│   │   └── browse/
+│   ├── components/                     # 通用 Compose 组件
+│   └── theme/                          # Material 3 主题
+│
+└── utils/
+    ├── ImageUtils.kt                   # Bitmap 处理工具
+    └── LogCapture.kt                   # 日志捕获
+```
+
+---
+
+## 14. 变更记录
 
 | 日期 | 版本 | 描述 |
 |------|------|------|
 | 2026-06-13 | 1.0 | 初始版本，完整架构文档 |
 | 2026-06-13 | 1.1 | 将架构评审内容独立为 ArchitectureReview.md |
+| 2026-06-13 | 2.0 | 新增目标架构设计(§10)、模块接口标准(§11)、技术规范(§12)、目标文件结构(§13) |
