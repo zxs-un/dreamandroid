@@ -1,6 +1,7 @@
 package io.github.dreamandroid.local.service
 
 import android.graphics.Bitmap
+import io.github.dreamandroid.local.core.error.AppError
 import io.github.dreamandroid.local.data.BatchGroupDisplay
 import io.github.dreamandroid.local.data.GenerationTask
 import io.github.dreamandroid.local.data.TaskStatus
@@ -94,6 +95,16 @@ class QueueRepository {
             it.copy(
                 status = TaskStatus.ERROR,
                 errorMessage = message,
+            )
+        }
+    }
+
+    /** Mark task as ERROR with an AppError */
+    fun markTaskError(id: String, error: AppError) {
+        updateTask(id) {
+            it.copy(
+                status = TaskStatus.ERROR,
+                errorMessage = error.message,
             )
         }
     }

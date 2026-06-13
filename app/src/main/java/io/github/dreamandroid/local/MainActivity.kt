@@ -705,18 +705,16 @@ private fun AppContent() {
                             if (isModelLoaded && selectedModelId == model.id) {
                                 unloadModel()
                             }
-                            val success = model.deleteModel(context)
-                            if (success) {
-                                if (selectedModelId == model.id) selectedModelId = null
-                                modelRepository.refreshAllModels()
-                                modelRefreshVersion++
-                                val deleteSuccessMsg = context.getString(R.string.delete_success)
-                                scope.launch {
+                            scope.launch {
+                                val success = model.deleteModel(context)
+                                if (success) {
+                                    if (selectedModelId == model.id) selectedModelId = null
+                                    modelRepository.refreshAllModels()
+                                    modelRefreshVersion++
+                                    val deleteSuccessMsg = context.getString(R.string.delete_success)
                                     snackbarHostState.showSnackbar(deleteSuccessMsg)
-                                }
-                            } else {
-                                val deleteFailedMsg = context.getString(R.string.delete_failed)
-                                scope.launch {
+                                } else {
+                                    val deleteFailedMsg = context.getString(R.string.delete_failed)
                                     snackbarHostState.showSnackbar(deleteFailedMsg)
                                 }
                             }
