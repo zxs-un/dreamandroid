@@ -24,6 +24,10 @@ on:
         description: 'Publish APK as GitHub Release'
         type: boolean
         default: false
+      verbose_logging:
+        description: 'Enable info/warn log output (--info instead of --quiet)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -326,7 +330,12 @@ jobs:
         id: gradle-build
         run: |
           set -euo pipefail
-          GRADLE_ARGS="assembleBasicRelease -x ktlintCheck -x detekt --quiet"
+          GRADLE_ARGS="assembleBasicRelease -x ktlintCheck -x detekt"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.event.inputs.verbose_logging }}" = "true" ]; then
+            GRADLE_ARGS="$GRADLE_ARGS --info"
+          else
+            GRADLE_ARGS="$GRADLE_ARGS --quiet"
+          fi
           if [ -f keystore.properties ]; then
             GRADLE_ARGS="$GRADLE_ARGS -PkeystorePropertiesFile=${PWD}/keystore.properties"
           fi
