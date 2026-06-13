@@ -56,7 +56,7 @@ fun healthCheck(
 suspend inline fun retryOrFalse(
     maxRetries: Int,
     delayMs: Long,
-    crossinline block: () -> Boolean,
+    crossinline block: suspend () -> Boolean,
 ): Boolean {
     repeat(maxRetries) {
         if (block()) return true
@@ -105,7 +105,7 @@ fun rgbBytesToBitmap(rgb: ByteArray, width: Int, height: Int): Bitmap {
         val b = rgb[off + 2].toInt() and 0xFF
         pixels[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
     }
-    val bitmap = createBitmap(width, height)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
     bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
     return bitmap
 }

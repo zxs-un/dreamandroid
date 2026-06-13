@@ -31,6 +31,7 @@ import io.github.dreamandroid.local.R
 import io.github.dreamandroid.local.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -119,8 +120,8 @@ fun GenerateScreen(
                     onSchedulerChange(prefs.scheduler)
                     onDenoiseStrengthChange(prefs.denoiseStrength)
                     onUseOpenCLChange(prefs.useOpenCL)
-                    if (prefs.width > 0) onWidthChange(prefs.width)
-                    if (prefs.height > 0) onHeightChange(prefs.height)
+                    if (prefs.width != -1) onWidthChange(prefs.width)
+                    if (prefs.height != -1) onHeightChange(prefs.height)
                 }
             }
         }

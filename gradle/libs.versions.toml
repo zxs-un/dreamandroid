@@ -18,6 +18,7 @@ material3-xml = "1.12.0"
 coil-compose = "2.4.0"
 cropify = "0.5.1"
 room = "2.8.4"
+coroutines = "1.10.2"
 ksp = "2.3.8"
 ktlint-gradle = "14.2.0"
 detekt = "1.23.7"
@@ -52,6 +53,7 @@ cropify = { module = "com.github.MoyuruAizawa:cropify", version.ref = "cropify" 
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -5,7 +5,7 @@ import java.io.IOException
 
 sealed class AppError(
     override val message: String,
-    open val cause: Throwable? = null
+    override val cause: Throwable? = null
 ) : Exception(message) {
 
     data class Network(

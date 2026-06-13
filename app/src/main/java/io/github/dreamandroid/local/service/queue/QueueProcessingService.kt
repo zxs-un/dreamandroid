@@ -22,6 +22,7 @@ import io.github.dreamandroid.local.ui.screens.GenerationParameters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,7 +126,7 @@ class QueueProcessingService : Service() {
     }
 
     private suspend fun processLoop() {
-        while (isActive) {
+        while (coroutineContext.isActive) {
             val task = queueRepository.getNextPending()
             if (task == null) {
                 Log.d(TAG, "No more pending tasks, stopping")

@@ -277,6 +277,7 @@ private fun AppContent() {
                 }
 
                 when (result) {
+                    null -> { /* timeout — task will remain pending */ }
                     is BackgroundGenerationService.GenerationState.Complete -> {
                         // Save to history
                         val params = GenerationParameters(
@@ -859,7 +860,7 @@ private fun AppContent() {
                         height = genHeight,
                         onHeightChange = { genHeight = it },
                         onAddToQueue = { count ->
-                            val modelId = if (isModelLoaded) selectedModelId else return@TabGenerateScreen
+                            val modelId = selectedModelId ?: return@TabGenerateScreen
                             queueRepository.addBatch(
                                 modelId = modelId,
                                 prompt = genPrompt,
@@ -877,9 +878,11 @@ private fun AppContent() {
                                 aspectRatio = inferAspectRatioString(genWidth, genHeight),
                                 count = count.coerceAtLeast(1),
                             )
-                            snackbarHostState.showSnackbar(
-                                context.getString(R.string.added_to_queue, count)
-                            )
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    context.getString(R.string.added_to_queue, count)
+                                )
+                            }
                         },
                     )
                     BottomTab.Upscale -> UpscaleScreen()
@@ -1206,9 +1209,6 @@ private fun ModelListTab(
             }
 
             // ---- Upscale Models Section (downloaded/imported only) ----
-            val downloadedUpscalers = remember(upscalerRepository.upscalers) {
-                upscalerRepository.upscalers.filter { it.isDownloaded }
-            }
             if (downloadedUpscalers.isNotEmpty()) {
                 item(key = "upscale_header") {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
