@@ -152,7 +152,7 @@ jobs:
         if: always() && steps.cmake-build.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
-          name: native-build-log
+          name: build-native.log
           path: app/src/main/native-build-log.txt
           retention-days: 7
 
@@ -346,7 +346,7 @@ jobs:
         if: always() && steps.gradle-build.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
-          name: build-log
+          name: build-gradle.log
           path: build-log.txt
           retention-days: 7
 
