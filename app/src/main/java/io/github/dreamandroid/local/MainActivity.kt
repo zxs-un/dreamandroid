@@ -1067,8 +1067,12 @@ private fun ModelListTab(
         modelRepository.models.filter { it.isCustom }
     }
 
+    val downloadedUpscalers = remember(upscalerRepository.upscalers) {
+        upscalerRepository.upscalers.filter { it.isDownloaded }
+    }
+
     val hasAnyContent = customModels.isNotEmpty() || importingModels.isNotEmpty() ||
-        upscalerRepository.upscalers.any { it.isDownloaded }
+        downloadedUpscalers.isNotEmpty()
 
     if (!hasAnyContent) {
         Box(
@@ -1117,9 +1121,6 @@ private fun ModelListTab(
             }
 
             // ---- Upscale Models Section (downloaded/imported only) ----
-            val downloadedUpscalers = remember(upscalerRepository.upscalers) {
-                upscalerRepository.upscalers.filter { it.isDownloaded }
-            }
             if (downloadedUpscalers.isNotEmpty()) {
                 item(key = "upscale_header") {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
