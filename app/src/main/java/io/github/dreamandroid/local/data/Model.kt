@@ -11,9 +11,7 @@ import androidx.compose.runtime.setValue
 import io.github.dreamandroid.local.R
 import io.github.dreamandroid.local.service.ModelDownloadService
 import java.io.File
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 @Immutable
@@ -136,15 +134,13 @@ data class Model(
         context.startForegroundService(intent)
     }
 
-    fun deleteModel(context: Context): Boolean = try {
+    suspend fun deleteModel(context: Context): Boolean = try {
         val modelDir = File(getModelsDir(context), id)
         val historyManager = HistoryManager(context)
         val generationPreferences = GenerationPreferences(context)
 
-        runBlocking {
-            historyManager.clearHistoryForModel(id)
-            generationPreferences.clearPreferencesForModel(id)
-        }
+        historyManager.clearHistoryForModel(id)
+        generationPreferences.clearPreferencesForModel(id)
 
         if (modelDir.exists() && modelDir.isDirectory) {
             val deleted = modelDir.deleteRecursively()
@@ -278,10 +274,10 @@ class UpscalerRepository(private val context: Context) {
         private set
 
     init {
-        CoroutineScope(Dispatchers.Main).launch {
+        runBlocking(Dispatchers.IO) {
             baseUrl = generationPreferences.getBaseUrl()
-            upscalers = initializeUpscalers()
         }
+        upscalers = initializeUpscalers()
     }
 
     private fun initializeUpscalers(): List<UpscalerModel> {
@@ -387,10 +383,10 @@ class ModelRepository(private val context: Context) {
         private set
 
     init {
-        CoroutineScope(Dispatchers.Main).launch {
+        runBlocking(Dispatchers.IO) {
             baseUrl = generationPreferences.getBaseUrl()
-            models = initializeModels()
         }
+        models = initializeModels()
     }
 
     private fun scanCustomModels(): List<Model> {

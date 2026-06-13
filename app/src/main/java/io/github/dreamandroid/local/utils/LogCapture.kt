@@ -5,9 +5,11 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 object LogCapture {
     private const val TAG = "LogCapture"
@@ -37,7 +39,7 @@ object LogCapture {
                     arrayOf("logcat", "--pid=$pid", "-v", "threadtime"),
                 )
                 captureProcess = proc
-                val scope = CoroutineScope(Dispatchers.IO)
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
                 captureScope = scope
                 captureJob = scope.launch {
                     try {
@@ -82,7 +84,12 @@ object LogCapture {
 
     private fun stopInternalLocked() {
         try {
-            captureProcess?.destroy()
+            captureProcess?.let { proc ->
+                proc.destroy()
+                if (!proc.waitFor(5, TimeUnit.SECONDS)) {
+                    proc.destroyForcibly()
+                }
+            }
         } catch (_: Exception) {
         }
         captureProcess = null

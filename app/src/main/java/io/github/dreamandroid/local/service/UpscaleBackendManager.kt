@@ -2,11 +2,13 @@ package io.github.dreamandroid.local.service
 
 import android.content.Context
 import android.util.Log
+import io.github.dreamandroid.local.service.backend.RuntimeDirPreparer
 import java.io.File
-import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,7 +48,7 @@ object UpscaleBackendManager {
         get() = _state.value is State.Running
 
     private var backendProcess: Process? = null
-    private val scope = CoroutineScope(Dispatchers.IO)
+    private var scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Start the upscale backend process for the given [upscalerId].
@@ -64,7 +66,7 @@ object UpscaleBackendManager {
 
         scope.launch {
             try {
-                val runtimeDir = prepareRuntimeDir(context)
+                val runtimeDir = RuntimeDirPreparer.prepare(context)
                 val nativeDir = context.applicationInfo.nativeLibraryDir
                 val executableFile = File(nativeDir, "libstable_diffusion_core.so")
 
@@ -173,6 +175,8 @@ object UpscaleBackendManager {
     fun stop() {
         stopInternal()
         _state.value = State.Idle
+        scope.cancel()
+        scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 
     private fun stopInternal() {
@@ -192,50 +196,4 @@ object UpscaleBackendManager {
     }
 
     val processLogs = mutableListOf<String>()
-}
-
-/**
- * Prepare the runtime library directory with QNN libraries from assets.
- */
-fun prepareRuntimeDir(context: Context): File {
-    val runtimeDir = File(context.filesDir, "runtime_libs").apply {
-        if (!exists()) {
-            mkdirs()
-        }
-    }
-
-    try {
-        val qnnlibsAssets = context.assets.list("qnnlibs")
-        qnnlibsAssets?.forEach { fileName ->
-            val targetLib = File(runtimeDir, fileName)
-
-            val needsCopy = !targetLib.exists() ||
-                run {
-                    val assetInputStream = context.assets.open("qnnlibs/$fileName")
-                    val assetSize = assetInputStream.use { it.available().toLong() }
-                    targetLib.length() != assetSize
-                }
-
-            if (needsCopy) {
-                val assetInputStream = context.assets.open("qnnlibs/$fileName")
-                assetInputStream.use { input ->
-                    targetLib.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                Log.d("UpscaleBackendMgr", "Copied $fileName from assets to runtime directory")
-            }
-
-            targetLib.setReadable(true, true)
-            targetLib.setExecutable(true, true)
-        }
-    } catch (e: IOException) {
-        Log.e("UpscaleBackendMgr", "Failed to prepare QNN libraries from assets", e)
-        throw RuntimeException("Failed to prepare QNN libraries from assets", e)
-    }
-
-    runtimeDir.setReadable(true, true)
-    runtimeDir.setExecutable(true, true)
-
-    return runtimeDir
 }
